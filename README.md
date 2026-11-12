@@ -1,0 +1,242 @@
+# BookRecs
+
+A tiny self-hosted book-tracking app. Create an account, fuzzy-search the
+[Open Library](https://openlibrary.org) to add books you've read (or add one
+by hand if it's missing), rank them in order (1 = your #1 — *not* a 1–5
+rating), write a short review, and add friends by username or email to browse
+each other's books. One page shows your **currently reading**, **read list**, and
+**wishlist** — the read list and wishlist are ranked in order (1 = top, drag to
+reorder); keep a wishlist (mark each book **owned** or not), pull a friend's
+book straight into your wishlist, move a wishlist item into your read list when
+you finish it, and mark what you're **currently reading**. Read/wishlist books
+are each **public or private** (friends only see the public ones); your
+**currently reading** is always visible to friends. Click any book title to see
+its **detail page** with synopsis, friend activity, and review carousel.
+
+Everything runs on one small Linux box: **Bun** + **SQLite** + **Vite/React**,
+exposed to the internet with a **cloudflared** quick tunnel.
+
+## Stack
+
+- **Runtime:** [Bun](https://bun.sh) (HTTP server + `bun:sqlite` + password hashing)
+- **Data:** SQLite (single file, WAL mode — no external DB)
+- **Frontend:** React + Vite, built to static files served by the same Bun process
+- **Auth:** username/email + password (argon2), self-signup, HttpOnly session cookie
+- **Books:** [Open Library](https://openlibrary.org) search + work metadata
+- **AI agents:** a stdio **MCP server** exposing the same operations as tools
+
+## Project layout
+
+```
+bookrecs/
+├─ src/
+│  ├─ server.ts    # Bun.serve entry: API + static frontend
+│  ├─ api.ts       # HTTP routes
+│  ├─ static.ts    # serves web/dist with SPA fallback
+│  ├─ mcp.ts       # MCP (stdio JSON-RPC) server for AI agents
+│  ├─ db.ts        # SQLite schema + connection
+│  ├─ auth.ts      # password hashing + sessions
+│  ├─ core.ts      # domain logic (books, ranked reads, friends)
+│  ├─ ol.ts        # Open Library client
+│  ├─ ratelimit.ts # login rate limiting
+│  ├─ twofa.ts     # 2FA TOTP implementation
+│  └─ encryption.ts# session token encryption
+├─ web/            # Vite + React frontend
+├─ scripts/
+│  ├─ mcp.sh       # cwd-independent MCP launcher
+│  └─ backfill-synopses.ts # fetch synopses for existing books
+└─ data/           # SQLite database lives here (gitignored)
+```
+
+## Quick start (development)
+
+```bash
+# one-time
+bun install
+(cd web && bun install)
+
+# terminal 1 — API server (port 3000)
+bun run dev
+
+# terminal 2 — Vite dev server (port 5173), proxies /api
+bun run dev:web
+```
+
+Open http://localhost:5173, sign up, and add a book.
+
+## Production (single process)
+
+```bash
+bun install          # if not done
+(cd web && bun install)
+bun run build        # builds web/dist
+bun run start        # serves API + frontend on PORT (default 3000)
+```
+
+The server serves the built frontend itself (`web/dist`), so only one process is
+needed in production.
+
+Environment variables (see `.env.example`):
+
+| Var            | Default               | Purpose                                   |
+|----------------|-----------------------|-------------------------------------------|
+| `PORT`         | `3000`                | HTTP listen port                          |
+| `BOOKRECS_DB`  | `data/bookrecs.sqlite`| SQLite file path (absolute or relative)   |
+| `BOOKRECS_USER`| —                     | User the MCP server acts on behalf of      |
+
+## Expose it with cloudflared (quick tunnel)
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+
+You'll get a free `https://<random>.trycloudflare.com` URL. Share that with your
+friends. *(The URL changes each time the tunnel restarts. For a permanent URL,
+create a named tunnel against your Cloudflare domain.)*
+
+To keep both running in the background:
+
+```bash
+# in two terminals, or via systemd/pm2/tmux
+bun run start
+cloudflared tunnel --url http://localhost:3000
+```
+
+## Talking to it from AI agents (MCP)
+
+The app ships an MCP server over stdio. It operates on **one user's account**,
+chosen at launch with `BOOKRECS_USER` (username or email). That user must exist
+(sign up via the web UI first).
+
+Register it with any MCP client (Claude Desktop, Claude Code, etc.):
+
+```json
+{
+  "mcpServers": {
+    "bookrecs": {
+      "command": "/path/to/bookrecs/scripts/mcp.sh",
+      "env": { "BOOKRECS_USER": "alice" }
+    }
+  }
+}
+```
+
+Or with Claude Code:
+
+```bash
+claude mcp add bookrecs -e BOOKRECS_USER=alice -- /path/to/bookrecs/scripts/mcp.sh
+```
+
+Or run it directly (from anywhere — paths are anchored to the repo):
+
+```bash
+BOOKRECS_USER=alice bun run src/mcp.ts
+```
+
+### MCP tools
+
+| Tool | Purpose |
+|------|---------|
+| `search_books`   | Fuzzy-search Open Library, returns `ol_key`s |
+| `add_book`       | Add a book to your list (optional rank + review) |
+| `add_manual_book`| Add a book that isn't in Open Library, by title/author |
+| `my_books`       | Your ranked list with reviews |
+| `remove_book`    | Remove a book by `ol_key` |
+| `set_review`     | Set/update a review |
+| `set_rank`       | Move one book to a new rank |
+| `reorder_books`  | Reorder the whole list (full ordered array) |
+| `search_users`   | Find users by username or email |
+| `send_friend_request` | Add a friend by username/email |
+| `friend_requests`| List pending incoming + outgoing requests |
+| `accept_friend_request` / `decline_friend_request` | Answer a request |
+| `list_friends`   | Your accepted friends |
+| `friend_books`   | A friend's ranked list + reviews |
+| `my_wishlist`    | Your wishlist (each item: `owned` + `public`) |
+| `add_to_wishlist`| Add to your wishlist by `ol_key` **or** `book_id` (a friend's book), optional `owned`/`public` |
+| `add_to_wishlist_manual` | Add a not-in-Open-Library book to your wishlist |
+| `remove_from_wishlist` | Remove a wishlist item by `book_id` |
+| `reorder_wishlist` | Reorder your wishlist (full ordered `book_id` array) |
+| `set_wish_rank`  | Move one wishlist book to a new rank |
+| `set_owned`      | Mark a wishlist item owned / not owned |
+| `set_public`     | Set a book public/private (`list` = `read` or `wish`) |
+| `friend_wishlist`| A friend's public wishlist items |
+| `move_to_read`   | Move a wishlist item into your read list (optional `review`, `rank`) |
+| `my_reading`     | The books you're currently reading |
+| `add_to_reading` | Mark a book currently reading (by `ol_key` or `book_id`) |
+| `add_to_reading_manual` | Add a not-in-Open-Library book as currently reading |
+| `finish_reading` | Move a currently-reading book into your read list |
+| `back_to_wishlist` | Move a currently-reading book back to the wishlist |
+| `remove_from_reading` | Remove a book from currently reading |
+| `friend_reading` | A friend's currently-reading books |
+
+Send it a line of JSON-RPC over stdio to try it manually:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"my_books","arguments":{}}}' \
+  | BOOKRECS_USER=alice bun run src/mcp.ts
+```
+
+## HTTP API (for scripts / non-MCP agents)
+
+All `POST`/`PATCH` bodies are JSON; auth is a session cookie (or `Authorization:
+Bearer <token>` where the token is minted via `POST /api/token`).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/signup` | `{username, email, password}` → starts a session |
+| POST | `/api/login`  | `{usernameOrEmail, password}` → starts a session |
+| POST | `/api/logout` | ends the session |
+| GET  | `/api/me`     | current user (or `{user: null}`) |
+| POST | `/api/token`  | mint a bearer token for scripting |
+| GET  | `/api/books/search?q=` | search Open Library |
+| POST | `/api/books`  | add `{ol_key, review?, rank?, year?, public?}` to your list |
+| POST | `/api/books/manual` | add by hand `{title, author?, year?, coverUrl?, review?, rank?, public?}` |
+| GET  | `/api/me/books` | your ranked list (each with `public`) |
+| POST | `/api/me/books/reorder` | `{ordered: [bookIds]}` full order |
+| PATCH| `/api/me/books/:id` | update `{review?}`, `{rank?}` |
+| POST | `/api/me/books/:id/public` | `{public}` set a book public/private |
+| DELETE | `/api/me/books/:id` | remove |
+| GET  | `/api/me/wishlist` | your wishlist (each item: `owned`, `public`) |
+| POST | `/api/me/wishlist` | add `{ol_key?, book_id?, owned?, public?, rank?}` (book_id = someone else's book) |
+| POST | `/api/me/wishlist/manual` | add by hand `{title, author?, year?, coverUrl?, owned?, public?, rank?}` |
+| POST | `/api/me/wishlist/reorder` | `{ordered: [bookIds]}` reorder wishlist |
+| POST | `/api/me/wishlist/:id/owned` | `{owned}` mark owned / not |
+| POST | `/api/me/wishlist/:id/public` | `{public}` set a wishlist item public/private |
+| POST | `/api/me/wishlist/:id/move-to-read` | `{review?, rank?}` move wishlist → read list |
+| DELETE | `/api/me/wishlist/:id` | remove wishlist item |
+| GET  | `/api/friends/:username/wishlist` | a friend's public wishlist |
+| GET  | `/api/me/reading` | your currently-reading books |
+| POST | `/api/me/reading` | add `{ol_key?, book_id?, year?}` (currently reading) |
+| POST | `/api/me/reading/manual` | add by hand `{title, author?, year?, coverUrl?}` |
+| POST | `/api/me/reading/:id/finish` | `{review?, rank?}` move reading → read list |
+| POST | `/api/me/reading/:id/back-to-wishlist` | move reading → wishlist |
+| DELETE | `/api/me/reading/:id` | remove |
+| GET  | `/api/friends/:username/reading` | a friend's currently-reading (always visible) |
+| GET  | `/api/users/search?q=` | find users by username/email |
+| GET  | `/api/friends` | accepted friends |
+| POST | `/api/friends/requests` | `{usernameOrEmail}` send request |
+| GET  | `/api/friends/requests` | pending requests (in/out) |
+| POST | `/api/friends/requests/:id/accept` | accept |
+| POST | `/api/friends/requests/:id/decline` | decline |
+| GET  | `/api/friends/:username/books` | a friend's public books (each flagged `mine`) |
+| DELETE | `/api/friends/:id` | unfriend |
+
+## Notes
+
+- Database is a single SQLite file under `data/`. Back it up by copying that
+  file (stop the server first, or use `.backup` for a live copy).
+- Rankings are an **ordered list** (1 = top), maintained by shifting ranks.
+- Every read/wishlist book is individually **public or private**; friends only
+  see your public books. Existing books were seeded public; newly added books
+  default private — flip the Public switch on a book to share it. Your
+  **currently reading** list has no privacy flag and is always visible to friends.
+- Tabs are real pages with hash URLs — `#/books`, `#/add`, `#/friends`,
+  `#/u/<username>` — so reloading keeps you on the same page.
+- Friend requests are mutual: a pending request from the other side is
+  auto-accepted when you send yours.
+- Starting a book is one tap: every book on a friend's profile has a “📖 Reading”
+  quick action (plus “♡ Wishlist”), and your own wishlist items have a
+  “📖 Reading” button to start reading them.
+- Reset the database with `bun run reset-db` (deletes `data/bookrecs.sqlite`).

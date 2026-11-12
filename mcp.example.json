@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "bookrecs": {
+      "command": "/path/to/bookrecs/scripts/mcp.sh",
+      "env": {
+        "BOOKRECS_USER": "alice"
+      }
+    }
+  }
+}

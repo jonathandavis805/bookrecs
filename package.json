@@ -1,0 +1,21 @@
+{
+  "name": "bookrecs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/server.ts",
+    "dev:web": "cd web && bun run dev",
+    "build": "cd web && bun run build",
+    "start": "bun run src/server.ts",
+    "mcp": "bun run src/mcp.ts",
+    "reset-db": "rm -f data/bookrecs.sqlite data/bookrecs.sqlite-shm data/bookrecs.sqlite-wal",
+    "demo:swipe": "npx tsx src/demo-swipe.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "otpauth": "^9.6.0"
+  }
+}
