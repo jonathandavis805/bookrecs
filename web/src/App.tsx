@@ -6,13 +6,11 @@ import AddBook from "./components/AddBook";
 import Friends from "./components/Friends";
 import Profile from "./components/Profile";
 import BookDetail from "./components/BookDetail";
-import Discover from "./components/Discover";
 
 type Route =
   | { name: "books" }
   | { name: "add" }
   | { name: "friends" }
-  | { name: "discover" }
   | { name: "profile"; username: string }
   | { name: "book"; bookId: number };
 
@@ -25,7 +23,6 @@ function parseRoute(): Route {
   if (h.startsWith("#/u/")) return { name: "profile", username: decodeURIComponent(h.slice(4)) };
   if (h === "#/add") return { name: "add" };
   if (h === "#/friends") return { name: "friends" };
-  if (h === "#/discover") return { name: "discover" };
   return { name: "books" };
 }
 
@@ -60,7 +57,7 @@ export default function App() {
   );
 }
 
-type TabName = "books" | "add" | "friends" | "discover";
+type TabName = "books" | "add" | "friends";
 
 function Main({
   user,
@@ -73,7 +70,7 @@ function Main({
   onLogout: () => void;
   onNavigate: (name: TabName) => void;
 }) {
-  const active = route.name === "books" || route.name === "add" || route.name === "friends" || route.name === "discover"
+  const active = route.name === "books" || route.name === "add" || route.name === "friends" 
     ? route.name 
     : null;
 
@@ -99,9 +96,6 @@ function Main({
           <button className={active === "friends" ? "active" : ""} onClick={() => onNavigate("friends")}>
             Friends
           </button>
-          <button className={active === "discover" ? "active" : ""} onClick={() => onNavigate("discover")}>
-            Discover
-          </button>
         </nav>
         <div className="userbox">
           <button className="link" onClick={() => openProfile(user.username)} title="Your profile">
@@ -123,7 +117,6 @@ function Main({
         )}
         {active === "add" && <AddBook />}
         {active === "friends" && <Friends onOpenProfile={openProfile} />}
-        {active === "discover" && <Discover />}
         {route.name === "profile" && (
           <Profile
             key={route.username}

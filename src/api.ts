@@ -329,16 +329,6 @@ export async function handleApi(req: Request): Promise<Response> {
     }
   }
 
-  // Discovery candidates: books in DB the user hasn't read, with features
-  if (path === "/api/discover/candidates" && method === "GET") {
-    try {
-      const candidates = await core.getDiscoverCandidates(user.id);
-      return json({ books: candidates });
-    } catch (e) {
-      return json({ error: "Failed to fetch discovery candidates", detail: String(e) }, 500);
-    }
-  }
-
   if (path === "/api/books/manual" && method === "POST") {
     const { title, author, year, coverUrl, review, rank, public: isPublic } = await readBody(req);
     const r = core.addManualBook(

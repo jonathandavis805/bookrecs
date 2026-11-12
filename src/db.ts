@@ -134,12 +134,6 @@ if (!readingCols.includes("wishlist_rank")) {
   db.exec("ALTER TABLE reading ADD COLUMN wishlist_public INTEGER");
 }
 
-// Cache OpenLibrary subjects for discover candidates
-const bookCols2 = (db.query("PRAGMA table_info(books)").all() as { name: string }[]).map((c) => c.name);
-if (!bookCols2.includes("subjects")) {
-  db.exec("ALTER TABLE books ADD COLUMN subjects TEXT");
-}
-
 export function now(): number {
   return Math.floor(Date.now() / 1000);
 }
