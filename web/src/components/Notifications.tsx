@@ -55,6 +55,26 @@ export default function Notifications({ onClose, onCountChange }: NotificationsP
     }
   }
 
+  async function approveUser(userId: number, notificationId: number) {
+    try {
+      await api(`/api/users/${userId}/approve`, { method: "POST" });
+      setNotifications((prev) => prev.map((n) => (n.id === notificationId ? { ...n, read: 1 } : n)));
+      onCountChange(notifications.filter((n) => !n.read && n.id !== notificationId).length);
+    } catch (err) {
+      console.error("Failed to approve user:", err);
+    }
+  }
+
+  async function rejectUser(userId: number, notificationId: number) {
+    try {
+      await api(`/api/users/${userId}/reject`, { method: "POST" });
+      setNotifications((prev) => prev.map((n) => (n.id === notificationId ? { ...n, read: 1 } : n)));
+      onCountChange(notifications.filter((n) => !n.read && n.id !== notificationId).length);
+    } catch (err) {
+      console.error("Failed to reject user:", err);
+    }
+  }
+
   function formatTime(timestamp: number): string {
     const date = new Date(timestamp * 1000);
     const now = new Date();
@@ -95,19 +115,40 @@ export default function Notifications({ onClose, onCountChange }: NotificationsP
                 </div>
               )}
               <ul className="notifications-list">
-                {notifications.map((n) => (
-                  <li key={n.id} className={`notification-item ${!n.read ? "unread" : ""}`}>
-                    <div className="notification-content">
-                      <div className="notification-message">{n.message}</div>
-                      <div className="notification-time">{formatTime(n.created_at)}</div>
-                    </div>
-                    {!n.read && (
-                      <button className="notification-dismiss" onClick={() => dismiss(n.id)}>
-                        ×
-                      </button>
-                    )}
-                  </li>
-                ))}
+                {notifications.map((n) => {
+                  const data = n.data ? JSON.parse(n.data) : null;
+                  const isSignupNotification = n.type === "new_user_signup" && !n.read;
+
+                  return (
+                    <li key={n.id} className={`notification-item ${!n.read ? "unread" : ""}`}>
+                      <div className="notification-content">
+                        <div className="notification-message">{n.message}</div>
+                        <div className="notification-time">{formatTime(n.created_at)}</div>
+                        {isSignupNotification && data && (
+                          <div className="notification-actions">
+                            <button
+                              className="btn-small btn-success"
+                              onClick={() => approveUser(data.id, n.id)}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="btn-small btn-danger"
+                              onClick={() => rejectUser(data.id, n.id)}
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {!n.read && !isSignupNotification && (
+                        <button className="notification-dismiss" onClick={() => dismiss(n.id)}>
+                          ×
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </>
           )}
