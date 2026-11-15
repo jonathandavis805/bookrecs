@@ -1,0 +1,14 @@
+name = "bookrecs"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "web/dist"
+
+[dev]
+port = 8788
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bookrecs-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[vars]
+ENVIRONMENT = "production"
