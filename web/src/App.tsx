@@ -6,6 +6,7 @@ import AddBook from "./components/AddBook";
 import Friends from "./components/Friends";
 import Profile from "./components/Profile";
 import BookDetail from "./components/BookDetail";
+import Settings from "./components/Settings";
 
 type Route =
   | { name: "books" }
@@ -73,6 +74,7 @@ function Main({
   const active = route.name === "books" || route.name === "add" || route.name === "friends" 
     ? route.name 
     : null;
+  const [showSettings, setShowSettings] = useState(false);
 
   function logout() {
     api("/api/logout", { method: "POST" }).finally(onLogout);
@@ -100,6 +102,9 @@ function Main({
         <div className="userbox">
           <button className="link" onClick={() => openProfile(user.username)} title="Your profile">
             @{user.username}
+          </button>
+          <button className="link" onClick={() => setShowSettings(true)} title="Settings">
+            ⚙️ Settings
           </button>
           <button className="link" onClick={logout}>
             Log out
@@ -137,6 +142,9 @@ function Main({
           />
         )}
       </main>
+      {showSettings && (
+        <Settings onClose={() => setShowSettings(false)} />
+      )}
     </div>
   );
 }
