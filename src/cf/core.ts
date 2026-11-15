@@ -6,10 +6,12 @@ export interface User {
   username: string;
   email: string;
   is_admin: number;
+  status: 'pending' | 'approved' | 'rejected';
+  book_limit: number;
 }
 
 export async function getUserById(db: D1Database, id: number): Promise<User | null> {
-  return await queryOne<User>(db, "SELECT id, username, email, is_admin FROM users WHERE id = ?", id);
+  return await queryOne<User>(db, "SELECT id, username, email, is_admin, status, book_limit FROM users WHERE id = ?", id);
 }
 
 export async function findUser(db: D1Database, identifier: string): Promise<(User & { password_hash: string }) | null> {
@@ -937,8 +939,14 @@ export async function getUserReadCount(db: D1Database, userId: number): Promise<
 }
 
 export async function canAddMoreBooks(db: D1Database, userId: number): Promise<boolean> {
+  const user = await getUserById(db, userId);
+  if (!user) return false;
+  
+  // book_limit = 0 means unlimited
+  if (user.book_limit === 0) return true;
+  
   const count = await getUserReadCount(db, userId);
-  return count < MAX_BOOKS_PER_USER;
+  return count < user.book_limit;
 }
 
 export async function getAdminUsers(db: D1Database): Promise<{ id: number; username: string }[]> {
@@ -984,7 +992,7 @@ export async function notifyAdminsOfNewUser(
     await createNotification(
       db,
       admin.id,
-      "new_user",
+      "new_user_signup",
       `New user signed up: @${newUser.username} (${newUser.email})`,
       { userId: newUser.id, username: newUser.username, email: newUser.email }
     );
@@ -1026,4 +1034,25 @@ export async function dismissAllNotifications(db: D1Database, userId: number): P
     "UPDATE notifications SET read = 1 WHERE user_id = ?",
     userId
   );
+}
+
+export async function approveUser(db: D1Database, userId: number): Promise<void> {
+  await execute(
+    db,
+    "UPDATE users SET status = 'approved', book_limit = 0 WHERE id = ?",
+    userId
+  );
+}
+
+export async function rejectUser(db: D1Database, userId: number): Promise<void> {
+  await execute(
+    db,
+    "UPDATE users SET status = 'rejected' WHERE id = ?",
+    userId
+  );
+}
+
+export async function getUserBookLimit(db: D1Database, userId: number): Promise<number> {
+  const user = await getUserById(db, userId);
+  return user?.book_limit ?? 25;
 }

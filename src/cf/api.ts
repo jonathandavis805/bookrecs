@@ -89,11 +89,25 @@ async function handleSignup(db: D1Database, username: unknown, email: unknown, p
   const hash = await auth.hashPassword(password);
   const user = await core.createUser(db, username, email, hash);
   
-  // Notify admins of new user signup
-  await core.notifyAdminsOfNewUser(db, user);
+  // Notify admins of new user signup (with user ID for approve/reject)
+  const admins = await core.getAdminUsers(db);
+  for (const admin of admins) {
+    await core.createNotification(
+      db,
+      admin.id,
+      "new_user_signup",
+      `New user signed up: ${user.username} (${user.email})`,
+      { id: user.id, username: user.username, email: user.email }
+    );
+  }
   
   const token = await auth.createSession(db, user.id);
-  return json({ user }, 200, { "set-cookie": setSessionCookie(token, req) });
+  return json({ 
+    user: { 
+      ...user,
+      bookLimit: user.book_limit === 0 ? null : user.book_limit
+    } 
+  }, 200, { "set-cookie": setSessionCookie(token, req) });
 }
 
 async function handleLogin(db: D1Database, usernameOrEmail: unknown, password: unknown, req: Request): Promise<Response> {
@@ -155,7 +169,15 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   }
   if (path === "/api/me" && method === "GET") {
     const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
-    return json({ user });
+    if (user) {
+      return json({ 
+        user: { 
+          ...user,
+          bookLimit: user.book_limit === 0 ? null : user.book_limit // null = unlimited
+        } 
+      });
+    }
+    return json({ user: null });
   }
   if (path === "/api/token" && method === "POST") {
     const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
@@ -301,7 +323,8 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     
     // Check if user has reached the book limit
     if (!(await core.canAddMoreBooks(db, user.id))) {
-      return json({ error: "You have reached the maximum of 25 books" }, 400);
+      const limit = await core.getUserBookLimit(db, user.id);
+      return json({ error: `You have reached the maximum of ${limit} books` }, 400);
     }
     
     const r = await core.addManualBook(
@@ -318,7 +341,8 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     
     // Check if user has reached the book limit
     if (!(await core.canAddMoreBooks(db, user.id))) {
-      return json({ error: "You have reached the maximum of 25 books" }, 400);
+      const limit = await core.getUserBookLimit(db, user.id);
+      return json({ error: `You have reached the maximum of ${limit} books` }, 400);
     }
     
     const r = await core.addRead(db, user.id, ol_key, review, rank, year, isPublic);
@@ -332,7 +356,8 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const readingSet = new Set(reading.map(b => b.book_id));
     const booksWithReadingStatus = books.map(b => ({ ...b, isReading: readingSet.has(b.book_id) }));
     const bookCount = await core.getUserReadCount(db, user.id);
-    return json({ books: booksWithReadingStatus, bookCount, maxBooks: 25 });
+    const bookLimit = await core.getUserBookLimit(db, user.id);
+    return json({ books: booksWithReadingStatus, bookCount, maxBooks: bookLimit });
   }
 
   if (path === "/api/me/books/reorder" && method === "POST") {
@@ -577,6 +602,45 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (path === "/api/notifications/dismiss-all" && method === "POST") {
     if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
     await core.dismissAllNotifications(db, user.id);
+    return json({ ok: true });
+  }
+
+  // ----- user approval (admin) -----
+  const approveUserMatch = path.match(/^\/api\/users\/(\d+)\/approve$/);
+  if (approveUserMatch && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const targetUserId = Number(approveUserMatch[1]);
+    await core.approveUser(db, targetUserId);
+    
+    // Dismiss the related notification
+    const notification = await queryOne<{ id: number }>(
+      db,
+      "SELECT id FROM notifications WHERE type = 'new_user_signup' AND data LIKE ? LIMIT 1",
+      `%"id":${targetUserId},%`
+    );
+    if (notification) {
+      await core.dismissNotification(db, user.id, notification.id);
+    }
+    
+    return json({ ok: true });
+  }
+
+  const rejectUserMatch = path.match(/^\/api\/users\/(\d+)\/reject$/);
+  if (rejectUserMatch && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const targetUserId = Number(rejectUserMatch[1]);
+    await core.rejectUser(db, targetUserId);
+    
+    // Dismiss the related notification
+    const notification = await queryOne<{ id: number }>(
+      db,
+      "SELECT id FROM notifications WHERE type = 'new_user_signup' AND data LIKE ? LIMIT 1",
+      `%"id":${targetUserId},%`
+    );
+    if (notification) {
+      await core.dismissNotification(db, user.id, notification.id);
+    }
+    
     return json({ ok: true });
   }
 

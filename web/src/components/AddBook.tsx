@@ -1,17 +1,19 @@
 import { useState, useEffect } from "react";
 import { api, SearchHit } from "../api";
 
-const MAX_BOOKS = 25;
-
 export default function AddBook() {
   const [bookCount, setBookCount] = useState(0);
+  const [bookLimit, setBookLimit] = useState<number | null>(25); // Default to 25, null = unlimited
 
   useEffect(() => {
-    api<{ bookCount: number }>("/api/me/books").then((d) => setBookCount(d.bookCount));
+    api<{ bookCount: number; maxBooks: number }>("/api/me/books").then((d) => {
+      setBookCount(d.bookCount);
+      setBookLimit(d.maxBooks === 0 ? null : d.maxBooks);
+    });
   }, []);
 
-  const atLimit = bookCount >= MAX_BOOKS;
-  const remaining = MAX_BOOKS - bookCount;
+  const atLimit = bookLimit !== null && bookCount >= bookLimit;
+  const remaining = bookLimit !== null ? bookLimit - bookCount : null;
 
   return (
     <div className="page">
@@ -21,23 +23,26 @@ export default function AddBook() {
           Search the Open Library — or add a book by hand if it's missing.
         </p>
         <p className="book-limit-info">
-          {atLimit
-            ? `You've reached the maximum of ${MAX_BOOKS} books.`
-            : `${remaining} of ${MAX_BOOKS} book slots remaining.`}
+          {bookLimit === null
+            ? "You have unlimited book slots."
+            : atLimit
+            ? `You've reached the maximum of ${bookLimit} books.`
+            : `${remaining} of ${bookLimit} book slots remaining.`}
         </p>
       </div>
-      <SearchPane atLimit={atLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
-      <ManualPane atLimit={atLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
+      <SearchPane atLimit={atLimit} bookLimit={bookLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
+      <ManualPane atLimit={atLimit} bookLimit={bookLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
     </div>
   );
 }
 
 interface PaneProps {
   atLimit: boolean;
+  bookLimit: number | null;
   onBookAdded: () => void;
 }
 
-function SearchPane({ atLimit, onBookAdded }: PaneProps) {
+function SearchPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
@@ -195,7 +200,7 @@ function SearchPane({ atLimit, onBookAdded }: PaneProps) {
   );
 }
 
-function ManualPane({ atLimit, onBookAdded }: PaneProps) {
+function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
   const [target, setTarget] = useState<"read" | "reading" | "wish">("read");
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
@@ -277,8 +282,8 @@ function ManualPane({ atLimit, onBookAdded }: PaneProps) {
 
       {done && <div className="info">{done}</div>}
       {error && <div className="error">{error}</div>}
-      {atLimit && target === "read" && (
-        <div className="error">You've reached the maximum of {MAX_BOOKS} books. Remove a book to add another.</div>
+      {atLimit && target === "read" && bookLimit !== null && (
+        <div className="error">You've reached the maximum of {bookLimit} books. Remove a book to add another.</div>
       )}
 
       <form className="manual-form" onSubmit={submit}>

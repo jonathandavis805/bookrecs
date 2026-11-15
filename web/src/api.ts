@@ -3,6 +3,7 @@ export interface User {
   username: string;
   email: string;
   is_admin: number;
+  bookLimit: number | null; // null = unlimited
 }
 
 export interface Book {
