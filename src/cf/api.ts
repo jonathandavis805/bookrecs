@@ -508,6 +508,34 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     if (r.error) return json({ error: r.error }, r.error === "User not found" ? 404 : 403);
     return json({ user: r.user, books: r.books });
   }
+  // ----- change password -----
+  if (path === "/api/change-password" && method === "POST") {
+    const { currentPassword, newPassword } = await readBody(req);
+    
+    if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
+      return json({ error: "Current and new password are required" }, 400);
+    }
+    
+    if (!validPassword(newPassword)) {
+      return json({ error: "New password must be at least 8 characters" }, 400);
+    }
+    
+    // Verify current password
+    const u = await core.findUser(db, user.email);
+    if (!u) return json({ error: "User not found" }, 404);
+    
+    const valid = await auth.verifyPassword(currentPassword, u.password_hash);
+    if (!valid) {
+      return json({ error: "Current password is incorrect" }, 401);
+    }
+    
+    // Hash and update to new password
+    const newHash = await auth.hashPassword(newPassword);
+    await execute(db, "UPDATE users SET password_hash = ? WHERE id = ?", newHash, user.id);
+    
+    return json({ ok: true });
+  }
+
   const unfriend = path.match(/^\/api\/friends\/(\d+)$/);
   if (unfriend && method === "DELETE") {
     await core.removeFriend(db, user.id, Number(unfriend[1]));
