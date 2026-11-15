@@ -96,15 +96,12 @@ function Main({
             Add Book
           </button>
           <button className={active === "friends" ? "active" : ""} onClick={() => onNavigate("friends")}>
-            Friends
+            My Account
           </button>
         </nav>
         <div className="userbox">
           <button className="link" onClick={() => openProfile(user.username)} title="Your profile">
             @{user.username}
-          </button>
-          <button className="link" onClick={() => setShowSettings(true)} title="Settings">
-            ⚙️ Settings
           </button>
           <button className="link" onClick={logout}>
             Log out
@@ -121,7 +118,13 @@ function Main({
           />
         )}
         {active === "add" && <AddBook />}
-        {active === "friends" && <Friends onOpenProfile={openProfile} />}
+        {active === "friends" && (
+          <Friends 
+            user={user} 
+            onOpenProfile={openProfile} 
+            onChangePassword={() => setShowSettings(true)} 
+          />
+        )}
         {route.name === "profile" && (
           <Profile
             key={route.username}
