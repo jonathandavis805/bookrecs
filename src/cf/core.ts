@@ -5,10 +5,11 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  is_admin: number;
 }
 
 export async function getUserById(db: D1Database, id: number): Promise<User | null> {
-  return await queryOne<User>(db, "SELECT id, username, email FROM users WHERE id = ?", id);
+  return await queryOne<User>(db, "SELECT id, username, email, is_admin FROM users WHERE id = ?", id);
 }
 
 export async function findUser(db: D1Database, identifier: string): Promise<(User & { password_hash: string }) | null> {
@@ -920,4 +921,109 @@ export async function backfillSynopses(db: D1Database): Promise<{ updated: numbe
   }
 
   return { updated, failed };
+}
+
+// ---------- Admin features ----------
+
+const MAX_BOOKS_PER_USER = 25;
+
+export async function getUserReadCount(db: D1Database, userId: number): Promise<number> {
+  const row = await queryOne<{ count: number }>(
+    db,
+    "SELECT COUNT(*) as count FROM reads WHERE user_id = ?",
+    userId
+  );
+  return row?.count ?? 0;
+}
+
+export async function canAddMoreBooks(db: D1Database, userId: number): Promise<boolean> {
+  const count = await getUserReadCount(db, userId);
+  return count < MAX_BOOKS_PER_USER;
+}
+
+export async function getAdminUsers(db: D1Database): Promise<{ id: number; username: string }[]> {
+  return await queryAll<{ id: number; username: string }>(
+    db,
+    "SELECT id, username FROM users WHERE is_admin = 1"
+  );
+}
+
+export interface Notification {
+  id: number;
+  user_id: number;
+  type: string;
+  message: string;
+  data: string | null;
+  read: number;
+  created_at: number;
+}
+
+export async function createNotification(
+  db: D1Database,
+  userId: number,
+  type: string,
+  message: string,
+  data?: any
+): Promise<void> {
+  await execute(
+    db,
+    "INSERT INTO notifications (user_id, type, message, data) VALUES (?, ?, ?, ?)",
+    userId,
+    type,
+    message,
+    data ? JSON.stringify(data) : null
+  );
+}
+
+export async function notifyAdminsOfNewUser(
+  db: D1Database,
+  newUser: { id: number; username: string; email: string }
+): Promise<void> {
+  const admins = await getAdminUsers(db);
+  for (const admin of admins) {
+    await createNotification(
+      db,
+      admin.id,
+      "new_user",
+      `New user signed up: @${newUser.username} (${newUser.email})`,
+      { userId: newUser.id, username: newUser.username, email: newUser.email }
+    );
+  }
+}
+
+export async function getNotifications(
+  db: D1Database,
+  userId: number,
+  unreadOnly = false
+): Promise<Notification[]> {
+  const query = unreadOnly
+    ? "SELECT * FROM notifications WHERE user_id = ? AND read = 0 ORDER BY created_at DESC"
+    : "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC";
+  return await queryAll<Notification>(db, query, userId);
+}
+
+export async function getUnreadNotificationCount(db: D1Database, userId: number): Promise<number> {
+  const row = await queryOne<{ count: number }>(
+    db,
+    "SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND read = 0",
+    userId
+  );
+  return row?.count ?? 0;
+}
+
+export async function dismissNotification(db: D1Database, userId: number, notificationId: number): Promise<void> {
+  await execute(
+    db,
+    "UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?",
+    notificationId,
+    userId
+  );
+}
+
+export async function dismissAllNotifications(db: D1Database, userId: number): Promise<void> {
+  await execute(
+    db,
+    "UPDATE notifications SET read = 1 WHERE user_id = ?",
+    userId
+  );
 }

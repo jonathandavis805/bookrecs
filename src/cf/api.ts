@@ -88,6 +88,10 @@ async function handleSignup(db: D1Database, username: unknown, email: unknown, p
 
   const hash = await auth.hashPassword(password);
   const user = await core.createUser(db, username, email, hash);
+  
+  // Notify admins of new user signup
+  await core.notifyAdminsOfNewUser(db, user);
+  
   const token = await auth.createSession(db, user.id);
   return json({ user }, 200, { "set-cookie": setSessionCookie(token, req) });
 }
@@ -125,7 +129,7 @@ async function handleLogin(db: D1Database, usernameOrEmail: unknown, password: u
   await ratelimit.clearAttempts(db, ip, identifier);
 
   const token = await auth.createSession(db, u.id);
-  return json({ user: { id: u.id, username: u.username, email: u.email } }, 200, {
+  return json({ user: { id: u.id, username: u.username, email: u.email, is_admin: u.is_admin } }, 200, {
     "set-cookie": setSessionCookie(token, req),
   });
 }
@@ -294,6 +298,12 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
 
   if (path === "/api/books/manual" && method === "POST") {
     const { title, author, year, coverUrl, review, rank, public: isPublic } = await readBody(req);
+    
+    // Check if user has reached the book limit
+    if (!(await core.canAddMoreBooks(db, user.id))) {
+      return json({ error: "You have reached the maximum of 25 books" }, 400);
+    }
+    
     const r = await core.addManualBook(
       db, user.id,
       { title, author, year: year != null && year !== "" ? Number(year) : undefined, coverUrl },
@@ -305,6 +315,12 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
 
   if (path === "/api/books" && method === "POST") {
     const { ol_key, review, rank, year, public: isPublic } = await readBody(req);
+    
+    // Check if user has reached the book limit
+    if (!(await core.canAddMoreBooks(db, user.id))) {
+      return json({ error: "You have reached the maximum of 25 books" }, 400);
+    }
+    
     const r = await core.addRead(db, user.id, ol_key, review, rank, year, isPublic);
     if (r.error) return json({ error: r.error }, 400);
     return json({ book: r.book, books: await core.listReads(db, user.id) });
@@ -315,7 +331,8 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const reading = await core.listReading(db, user.id);
     const readingSet = new Set(reading.map(b => b.book_id));
     const booksWithReadingStatus = books.map(b => ({ ...b, isReading: readingSet.has(b.book_id) }));
-    return json({ books: booksWithReadingStatus });
+    const bookCount = await core.getUserReadCount(db, user.id);
+    return json({ books: booksWithReadingStatus, bookCount, maxBooks: 25 });
   }
 
   if (path === "/api/me/books/reorder" && method === "POST") {
@@ -540,6 +557,27 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (unfriend && method === "DELETE") {
     await core.removeFriend(db, user.id, Number(unfriend[1]));
     return json({ friends: await core.listFriends(db, user.id) });
+  }
+
+  // ----- notifications (admin) -----
+  if (path === "/api/notifications" && method === "GET") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const notifications = await core.getNotifications(db, user.id);
+    const unreadCount = await core.getUnreadNotificationCount(db, user.id);
+    return json({ notifications, unreadCount });
+  }
+
+  const dismissNotification = path.match(/^\/api\/notifications\/(\d+)\/dismiss$/);
+  if (dismissNotification && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    await core.dismissNotification(db, user.id, Number(dismissNotification[1]));
+    return json({ ok: true });
+  }
+
+  if (path === "/api/notifications/dismiss-all" && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    await core.dismissAllNotifications(db, user.id);
+    return json({ ok: true });
   }
 
   return json({ error: "Not found" }, 404);

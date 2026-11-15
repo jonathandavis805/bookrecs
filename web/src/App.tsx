@@ -7,6 +7,7 @@ import Friends from "./components/Friends";
 import Profile from "./components/Profile";
 import BookDetail from "./components/BookDetail";
 import Settings from "./components/Settings";
+import Notifications from "./components/Notifications";
 
 type Route =
   | { name: "books" }
@@ -75,6 +76,25 @@ function Main({
     ? route.name 
     : null;
   const [showSettings, setShowSettings] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const isAdmin = user.is_admin === 1;
+
+  // Fetch unread notification count for admins
+  useEffect(() => {
+    if (!isAdmin) return;
+    
+    const fetchCount = () => {
+      api<{ unreadCount: number }>("/api/notifications")
+        .then((d) => setUnreadCount(d.unreadCount))
+        .catch(() => {});
+    };
+    
+    fetchCount();
+    const interval = setInterval(fetchCount, 30000); // Poll every 30 seconds
+    return () => clearInterval(interval);
+  }, [isAdmin]);
 
   function logout() {
     api("/api/logout", { method: "POST" }).finally(onLogout);
@@ -100,6 +120,16 @@ function Main({
           </button>
         </nav>
         <div className="userbox">
+          {isAdmin && (
+            <button
+              className="link notification-bell"
+              onClick={() => setShowNotifications(true)}
+              title="Notifications"
+            >
+              🔔
+              {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
+            </button>
+          )}
           <button className="link" onClick={() => openProfile(user.username)} title="Your profile">
             @{user.username}
           </button>
@@ -147,6 +177,12 @@ function Main({
       </main>
       {showSettings && (
         <Settings onClose={() => setShowSettings(false)} />
+      )}
+      {showNotifications && isAdmin && (
+        <Notifications
+          onClose={() => setShowNotifications(false)}
+          onCountChange={setUnreadCount}
+        />
       )}
     </div>
   );

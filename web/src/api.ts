@@ -2,6 +2,7 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  is_admin: number;
 }
 
 export interface Book {

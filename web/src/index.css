@@ -1076,3 +1076,120 @@ button.secondary:hover:not(:disabled) {
   margin: 24px;
   text-align: center;
 }
+
+/* ---------- Notifications Bell ---------- */
+.notification-bell {
+  position: relative;
+  font-size: 20px;
+  padding: 4px 8px;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  background: #e74c3c;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+/* ---------- Notifications Modal ---------- */
+.notifications-modal {
+  max-width: 480px;
+  width: 100%;
+}
+
+.notifications-content {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.notifications-actions {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+}
+
+.notifications-actions .link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.notifications-actions .link:hover {
+  color: var(--accent-hover);
+}
+
+.notifications-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+
+.notification-item:last-child {
+  border-bottom: none;
+}
+
+.notification-item.unread {
+  background: var(--accent-light);
+}
+
+.notification-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-message {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.notification-time {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.notification-dismiss {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.notification-dismiss:hover {
+  color: var(--text);
+}
+
+/* ---------- Book Limit Info ---------- */
+.book-limit-info {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+}
