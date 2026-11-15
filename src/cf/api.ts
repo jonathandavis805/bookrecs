@@ -129,7 +129,7 @@ async function handleLogin(db: D1Database, usernameOrEmail: unknown, password: u
   await ratelimit.clearAttempts(db, ip, identifier);
 
   const token = await auth.createSession(db, u.id);
-  return json({ user: { id: u.id, username: u.username, email: u.email } }, 200, {
+  return json({ user: { id: u.id, username: u.username, email: u.email, is_admin: u.is_admin } }, 200, {
     "set-cookie": setSessionCookie(token, req),
   });
 }
