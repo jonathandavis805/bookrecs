@@ -8,7 +8,15 @@ port = 8788
 [[d1_databases]]
 binding = "DB"
 database_name = "bookrecs-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "8432ff9d-627a-4a46-a5c3-2bbffba2f6a8"
 
 [vars]
 ENVIRONMENT = "production"
+
+# Custom domain setup:
+# 1. Add the domain to your Pages project:
+#    npx wrangler pages project update bookrecs --domain bookrecs.dev
+# 2. Or use the Cloudflare dashboard:
+#    Pages > bookrecs > Custom domains > Add domain
+# 3. Ensure bookrecs.dev is added to your Cloudflare account
+#    (either as a zone or via CNAME if using a different registrar)

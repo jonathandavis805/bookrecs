@@ -62,10 +62,11 @@ async function bearerUser(db: D1Database, req: Request): Promise<core.User | nul
 function setSessionCookie(token: string, req: Request): string {
   const host = req.headers.get("host") || "localhost";
   const protocol = req.headers.get("x-forwarded-proto") || "http";
-  const isSecure = protocol === "https" || host.includes(".pages.dev");
+  const isSecure = protocol === "https" || host.includes("bookrecs.dev") || host.includes(".pages.dev");
 
   const secureFlag = isSecure ? "Secure; " : "";
-  return `${SESSION_COOKIE}=${token}; HttpOnly; ${secureFlag}Path=/; SameSite=None; Max-Age=${SESSION_TTL}`;
+  const domain = host.includes("bookrecs.dev") ? "; Domain=bookrecs.dev" : "";
+  return `${SESSION_COOKIE}=${token}; HttpOnly; ${secureFlag}Path=/${domain}; SameSite=None; Max-Age=${SESSION_TTL}`;
 }
 
 function validUsername(u: unknown): u is string {
