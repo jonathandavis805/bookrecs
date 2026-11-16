@@ -644,5 +644,12 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     return json({ ok: true });
   }
 
+  // Cleanup rejected users after grace period
+  if (path === "/api/admin/cleanup-rejected" && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const result = await core.cleanupRejectedUsers(db);
+    return json({ ok: true, deleted: result.deleted });
+  }
+
   return json({ error: "Not found" }, 404);
 }

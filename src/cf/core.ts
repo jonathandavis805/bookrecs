@@ -8,10 +8,11 @@ export interface User {
   is_admin: number;
   status: 'pending' | 'approved' | 'rejected';
   book_limit: number;
+  rejected_at: number | null;
 }
 
 export async function getUserById(db: D1Database, id: number): Promise<User | null> {
-  return await queryOne<User>(db, "SELECT id, username, email, is_admin, status, book_limit FROM users WHERE id = ?", id);
+  return await queryOne<User>(db, "SELECT id, username, email, is_admin, status, book_limit, rejected_at FROM users WHERE id = ?", id);
 }
 
 export async function findUser(db: D1Database, identifier: string): Promise<(User & { password_hash: string }) | null> {
@@ -1007,7 +1008,24 @@ export async function getNotifications(
   const query = unreadOnly
     ? "SELECT * FROM notifications WHERE user_id = ? AND read = 0 ORDER BY created_at DESC"
     : "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC";
-  return await queryAll<Notification>(db, query, userId);
+  const notifications = await queryAll<Notification>(db, query, userId);
+  
+  // For new_user_signup notifications, enrich with current user status
+  for (const n of notifications) {
+    if (n.type === "new_user_signup" && n.data) {
+      try {
+        const data = JSON.parse(n.data);
+        const user = await getUserById(db, data.userId);
+        if (user) {
+          n.data = JSON.stringify({ ...data, status: user.status, rejected_at: user.rejected_at });
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+  }
+  
+  return notifications;
 }
 
 export async function getUnreadNotificationCount(db: D1Database, userId: number): Promise<number> {
@@ -1047,7 +1065,8 @@ export async function approveUser(db: D1Database, userId: number): Promise<void>
 export async function rejectUser(db: D1Database, userId: number): Promise<void> {
   await execute(
     db,
-    "UPDATE users SET status = 'rejected' WHERE id = ?",
+    "UPDATE users SET status = 'rejected', rejected_at = ? WHERE id = ?",
+    now(),
     userId
   );
 }
@@ -1055,4 +1074,20 @@ export async function rejectUser(db: D1Database, userId: number): Promise<void> 
 export async function getUserBookLimit(db: D1Database, userId: number): Promise<number> {
   const user = await getUserById(db, userId);
   return user?.book_limit ?? 25;
+}
+
+// Grace period for rejected accounts before deletion (7 days)
+const REJECTION_GRACE_PERIOD_DAYS = 7;
+
+export async function cleanupRejectedUsers(db: D1Database): Promise<{ deleted: number }> {
+  const gracePeriodSeconds = REJECTION_GRACE_PERIOD_DAYS * 24 * 60 * 60;
+  const cutoffTime = now() - gracePeriodSeconds;
+  
+  const result = await execute(
+    db,
+    "DELETE FROM users WHERE status = 'rejected' AND rejected_at IS NOT NULL AND rejected_at < ?",
+    cutoffTime
+  );
+  
+  return { deleted: result.changes || 0 };
 }
