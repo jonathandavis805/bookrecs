@@ -120,6 +120,8 @@ export default function Notifications({ onClose, onCountChange }: NotificationsP
                   const isSignupNotification = n.type === "new_user_signup";
                   const userStatus = data?.status;
                   const rejectedAt = data?.rejected_at;
+                  // Handle both 'id' and 'userId' fields for backward compatibility
+                  const targetUserId = data?.userId || data?.id;
                   
                   // Calculate days remaining for rejected users
                   let daysRemaining = 0;
@@ -146,17 +148,17 @@ export default function Notifications({ onClose, onCountChange }: NotificationsP
                         )}
                         
                         {/* Show approve/reject buttons only for pending users */}
-                        {isSignupNotification && !n.read && userStatus === "pending" && data && (
+                        {isSignupNotification && !n.read && userStatus === "pending" && data && targetUserId && (
                           <div className="notification-actions">
                             <button
                               className="btn-small btn-success"
-                              onClick={() => approveUser(data.id, n.id)}
+                              onClick={() => approveUser(targetUserId, n.id)}
                             >
                               Approve
                             </button>
                             <button
                               className="btn-small btn-danger"
-                              onClick={() => rejectUser(data.id, n.id)}
+                              onClick={() => rejectUser(targetUserId, n.id)}
                             >
                               Reject
                             </button>

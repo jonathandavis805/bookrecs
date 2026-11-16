@@ -1015,9 +1015,13 @@ export async function getNotifications(
     if (n.type === "new_user_signup" && n.data) {
       try {
         const data = JSON.parse(n.data);
-        const user = await getUserById(db, data.userId);
-        if (user) {
-          n.data = JSON.stringify({ ...data, status: user.status, rejected_at: user.rejected_at });
+        // Handle both 'id' and 'userId' fields for backward compatibility
+        const targetUserId = data.userId || data.id;
+        if (targetUserId) {
+          const user = await getUserById(db, targetUserId);
+          if (user) {
+            n.data = JSON.stringify({ ...data, status: user.status, rejected_at: user.rejected_at });
+          }
         }
       } catch (e) {
         // Ignore parse errors
