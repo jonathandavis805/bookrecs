@@ -117,14 +117,36 @@ export default function Notifications({ onClose, onCountChange }: NotificationsP
               <ul className="notifications-list">
                 {notifications.map((n) => {
                   const data = n.data ? JSON.parse(n.data) : null;
-                  const isSignupNotification = n.type === "new_user_signup" && !n.read;
+                  const isSignupNotification = n.type === "new_user_signup";
+                  const userStatus = data?.status;
+                  const rejectedAt = data?.rejected_at;
+                  
+                  // Calculate days remaining for rejected users
+                  let daysRemaining = 0;
+                  if (userStatus === "rejected" && rejectedAt) {
+                    const gracePeriodDays = 7;
+                    const rejectedDate = new Date(rejectedAt * 1000);
+                    const now = new Date();
+                    const daysSinceRejection = Math.floor((now.getTime() - rejectedDate.getTime()) / 86400000);
+                    daysRemaining = Math.max(0, gracePeriodDays - daysSinceRejection);
+                  }
 
                   return (
                     <li key={n.id} className={`notification-item ${!n.read ? "unread" : ""}`}>
                       <div className="notification-content">
                         <div className="notification-message">{n.message}</div>
                         <div className="notification-time">{formatTime(n.created_at)}</div>
-                        {isSignupNotification && data && (
+                        
+                        {/* Show status for processed signup notifications */}
+                        {isSignupNotification && data && userStatus && userStatus !== "pending" && (
+                          <div className={`notification-status status-${userStatus}`}>
+                            {userStatus === "approved" && "✓ Approved"}
+                            {userStatus === "rejected" && `✗ Rejected (${daysRemaining} days remaining)`}
+                          </div>
+                        )}
+                        
+                        {/* Show approve/reject buttons only for pending users */}
+                        {isSignupNotification && !n.read && userStatus === "pending" && data && (
                           <div className="notification-actions">
                             <button
                               className="btn-small btn-success"
@@ -141,7 +163,7 @@ export default function Notifications({ onClose, onCountChange }: NotificationsP
                           </div>
                         )}
                       </div>
-                      {!n.read && !isSignupNotification && (
+                      {!n.read && userStatus !== "pending" && (
                         <button className="notification-dismiss" onClick={() => dismiss(n.id)}>
                           ×
                         </button>
