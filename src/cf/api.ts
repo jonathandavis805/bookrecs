@@ -88,8 +88,26 @@ async function handleSignup(db: D1Database, username: unknown, email: unknown, p
 
   const hash = await auth.hashPassword(password);
   const user = await core.createUser(db, username, email, hash);
+  
+  // Notify admins of new user signup (with user ID for approve/reject)
+  const admins = await core.getAdminUsers(db);
+  for (const admin of admins) {
+    await core.createNotification(
+      db,
+      admin.id,
+      "new_user_signup",
+      `New user signed up: ${user.username} (${user.email})`,
+      { id: user.id, username: user.username, email: user.email }
+    );
+  }
+  
   const token = await auth.createSession(db, user.id);
-  return json({ user }, 200, { "set-cookie": setSessionCookie(token, req) });
+  return json({ 
+    user: { 
+      ...user,
+      bookLimit: user.book_limit === 0 ? null : user.book_limit
+    } 
+  }, 200, { "set-cookie": setSessionCookie(token, req) });
 }
 
 async function handleLogin(db: D1Database, usernameOrEmail: unknown, password: unknown, req: Request): Promise<Response> {
@@ -125,7 +143,7 @@ async function handleLogin(db: D1Database, usernameOrEmail: unknown, password: u
   await ratelimit.clearAttempts(db, ip, identifier);
 
   const token = await auth.createSession(db, u.id);
-  return json({ user: { id: u.id, username: u.username, email: u.email } }, 200, {
+  return json({ user: { id: u.id, username: u.username, email: u.email, is_admin: u.is_admin } }, 200, {
     "set-cookie": setSessionCookie(token, req),
   });
 }
@@ -151,7 +169,28 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   }
   if (path === "/api/me" && method === "GET") {
     const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
-    return json({ user });
+    if (user) {
+      return json({ 
+        user: { 
+          ...user,
+          bookLimit: user.book_limit === 0 ? null : user.book_limit, // null = unlimited
+          discoverable: Boolean(user.discoverable)
+        } 
+      });
+    }
+    return json({ user: null });
+  }
+  if (path === "/api/me/privacy" && method === "GET") {
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
+    if (!user) return json({ error: "Unauthorized" }, 401);
+    return json({ discoverable: await core.getDiscoverable(db, user.id) });
+  }
+  if (path === "/api/me/privacy" && method === "POST") {
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
+    if (!user) return json({ error: "Unauthorized" }, 401);
+    const { discoverable } = await readBody(req);
+    await core.setDiscoverable(db, user.id, !!discoverable);
+    return json({ ok: true, discoverable: !!discoverable });
   }
   if (path === "/api/token" && method === "POST") {
     const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
@@ -294,6 +333,13 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
 
   if (path === "/api/books/manual" && method === "POST") {
     const { title, author, year, coverUrl, review, rank, public: isPublic } = await readBody(req);
+    
+    // Check if user has reached the book limit
+    if (!(await core.canAddMoreBooks(db, user.id))) {
+      const limit = await core.getUserBookLimit(db, user.id);
+      return json({ error: `You have reached the maximum of ${limit} books` }, 400);
+    }
+    
     const r = await core.addManualBook(
       db, user.id,
       { title, author, year: year != null && year !== "" ? Number(year) : undefined, coverUrl },
@@ -305,6 +351,13 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
 
   if (path === "/api/books" && method === "POST") {
     const { ol_key, review, rank, year, public: isPublic } = await readBody(req);
+    
+    // Check if user has reached the book limit
+    if (!(await core.canAddMoreBooks(db, user.id))) {
+      const limit = await core.getUserBookLimit(db, user.id);
+      return json({ error: `You have reached the maximum of ${limit} books` }, 400);
+    }
+    
     const r = await core.addRead(db, user.id, ol_key, review, rank, year, isPublic);
     if (r.error) return json({ error: r.error }, 400);
     return json({ book: r.book, books: await core.listReads(db, user.id) });
@@ -315,7 +368,9 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const reading = await core.listReading(db, user.id);
     const readingSet = new Set(reading.map(b => b.book_id));
     const booksWithReadingStatus = books.map(b => ({ ...b, isReading: readingSet.has(b.book_id) }));
-    return json({ books: booksWithReadingStatus });
+    const bookCount = await core.getUserReadCount(db, user.id);
+    const bookLimit = await core.getUserBookLimit(db, user.id);
+    return json({ books: booksWithReadingStatus, bookCount, maxBooks: bookLimit });
   }
 
   if (path === "/api/me/books/reorder" && method === "POST") {
@@ -467,6 +522,13 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     if (!q) return json({ users: [] });
     return json({ users: await core.searchUsers(db, q, user.id) });
   }
+  if (path === "/api/users/discover" && method === "GET") {
+    const q = (url.searchParams.get("q") ?? "").trim();
+    if (q) {
+      return json({ users: await core.searchUsers(db, q, user.id) });
+    }
+    return json({ users: await core.discoverUsers(db, user.id) });
+  }
 
   // ----- friends -----
   if (path === "/api/friends" && method === "GET") {
@@ -508,10 +570,105 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     if (r.error) return json({ error: r.error }, r.error === "User not found" ? 404 : 403);
     return json({ user: r.user, books: r.books });
   }
+  // ----- change password -----
+  if (path === "/api/change-password" && method === "POST") {
+    const { currentPassword, newPassword } = await readBody(req);
+    
+    if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
+      return json({ error: "Current and new password are required" }, 400);
+    }
+    
+    if (!validPassword(newPassword)) {
+      return json({ error: "New password must be at least 8 characters" }, 400);
+    }
+    
+    // Verify current password
+    const u = await core.findUser(db, user.email);
+    if (!u) return json({ error: "User not found" }, 404);
+    
+    const valid = await auth.verifyPassword(currentPassword, u.password_hash);
+    if (!valid) {
+      return json({ error: "Current password is incorrect" }, 401);
+    }
+    
+    // Hash and update to new password
+    const newHash = await auth.hashPassword(newPassword);
+    await execute(db, "UPDATE users SET password_hash = ? WHERE id = ?", newHash, user.id);
+    
+    return json({ ok: true });
+  }
+
   const unfriend = path.match(/^\/api\/friends\/(\d+)$/);
   if (unfriend && method === "DELETE") {
     await core.removeFriend(db, user.id, Number(unfriend[1]));
     return json({ friends: await core.listFriends(db, user.id) });
+  }
+
+  // ----- notifications (admin) -----
+  if (path === "/api/notifications" && method === "GET") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const notifications = await core.getNotifications(db, user.id);
+    const unreadCount = await core.getUnreadNotificationCount(db, user.id);
+    return json({ notifications, unreadCount });
+  }
+
+  const dismissNotification = path.match(/^\/api\/notifications\/(\d+)\/dismiss$/);
+  if (dismissNotification && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    await core.dismissNotification(db, user.id, Number(dismissNotification[1]));
+    return json({ ok: true });
+  }
+
+  if (path === "/api/notifications/dismiss-all" && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    await core.dismissAllNotifications(db, user.id);
+    return json({ ok: true });
+  }
+
+  // ----- user approval (admin) -----
+  const approveUserMatch = path.match(/^\/api\/users\/(\d+)\/approve$/);
+  if (approveUserMatch && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const targetUserId = Number(approveUserMatch[1]);
+    await core.approveUser(db, targetUserId);
+    
+    // Dismiss the related notification
+    const notification = await queryOne<{ id: number }>(
+      db,
+      "SELECT id FROM notifications WHERE type = 'new_user_signup' AND data LIKE ? LIMIT 1",
+      `%"id":${targetUserId},%`
+    );
+    if (notification) {
+      await core.dismissNotification(db, user.id, notification.id);
+    }
+    
+    return json({ ok: true });
+  }
+
+  const rejectUserMatch = path.match(/^\/api\/users\/(\d+)\/reject$/);
+  if (rejectUserMatch && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const targetUserId = Number(rejectUserMatch[1]);
+    await core.rejectUser(db, targetUserId);
+    
+    // Dismiss the related notification
+    const notification = await queryOne<{ id: number }>(
+      db,
+      "SELECT id FROM notifications WHERE type = 'new_user_signup' AND data LIKE ? LIMIT 1",
+      `%"id":${targetUserId},%`
+    );
+    if (notification) {
+      await core.dismissNotification(db, user.id, notification.id);
+    }
+    
+    return json({ ok: true });
+  }
+
+  // Cleanup rejected users after grace period
+  if (path === "/api/admin/cleanup-rejected" && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const result = await core.cleanupRejectedUsers(db);
+    return json({ ok: true, deleted: result.deleted });
   }
 
   return json({ error: "Not found" }, 404);

@@ -2,19 +2,47 @@ import { useState, useEffect } from "react";
 import { api, SearchHit } from "../api";
 
 export default function AddBook() {
+  const [bookCount, setBookCount] = useState(0);
+  const [bookLimit, setBookLimit] = useState<number | null>(25); // Default to 25, null = unlimited
+
+  useEffect(() => {
+    api<{ bookCount: number; maxBooks: number }>("/api/me/books").then((d) => {
+      setBookCount(d.bookCount);
+      setBookLimit(d.maxBooks === 0 ? null : d.maxBooks);
+    });
+  }, []);
+
+  const atLimit = bookLimit !== null && bookCount >= bookLimit;
+  const remaining = bookLimit !== null ? bookLimit - bookCount : null;
+
   return (
     <div className="page">
       <div className="page-head">
         <h2>Add a Book</h2>
-        <p className="muted">Search the Open Library — or add a book by hand if it's missing.</p>
+        <p className="muted">
+          Search the Open Library — or add a book by hand if it's missing.
+        </p>
+        <p className="book-limit-info">
+          {bookLimit === null
+            ? "You have unlimited book slots."
+            : atLimit
+            ? `You've reached the maximum of ${bookLimit} books.`
+            : `${remaining} of ${bookLimit} book slots remaining.`}
+        </p>
       </div>
-      <SearchPane />
-      <ManualPane />
+      <SearchPane atLimit={atLimit} bookLimit={bookLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
+      <ManualPane atLimit={atLimit} bookLimit={bookLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
     </div>
   );
 }
 
-function SearchPane() {
+interface PaneProps {
+  atLimit: boolean;
+  bookLimit: number | null;
+  onBookAdded: () => void;
+}
+
+function SearchPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
@@ -49,6 +77,8 @@ function SearchPane() {
   }, [q]);
 
   async function add(hit: SearchHit, target: "read" | "reading" | "wish") {
+    if (target === "read" && atLimit) return;
+    
     const key = `${hit.key}:${target}`;
     setStatus((s) => ({ ...s, [key]: "Adding…" }));
     try {
@@ -58,6 +88,7 @@ function SearchPane() {
           body: JSON.stringify({ ol_key: hit.key, year: hit.year }),
         });
         setStatus((s) => ({ ...s, [key]: "Added ✓" }));
+        onBookAdded();
       } else if (target === "reading") {
         await api("/api/me/reading", {
           method: "POST",
@@ -95,6 +126,7 @@ function SearchPane() {
           const readS = status[`${h.key}:read`];
           const read2 = status[`${h.key}:reading`];
           const wishS = status[`${h.key}:wish`];
+          const canAddRead = !atLimit && readS !== "Added ✓";
           return (
             <li key={h.key} className="book-row">
               {h.coverUrl ? (
@@ -118,8 +150,12 @@ function SearchPane() {
                 ) : readS && readS !== "Adding…" ? (
                   <span className="added error-text">{readS}</span>
                 ) : (
-                  <button onClick={() => add(h, "read")} disabled={readS === "Adding…"}>
-                    {readS === "Adding…" ? "…" : "My Books"}
+                  <button
+                    onClick={() => add(h, "read")}
+                    disabled={readS === "Adding…" || atLimit}
+                    title={atLimit ? "Book limit reached" : ""}
+                  >
+                    {readS === "Adding…" ? "…" : atLimit ? "Limit reached" : "My Books"}
                   </button>
                 )}
                 {read2 === "Reading ✓" ? (
@@ -156,7 +192,7 @@ function SearchPane() {
 
       {searched && hits.length === 0 && !error && (
         <div className="empty">
-          <p>No matches for “{q}”.</p>
+          <p>No matches for "{q}".</p>
           <p className="muted">Add it by hand using the form below. 👇</p>
         </div>
       )}
@@ -164,7 +200,7 @@ function SearchPane() {
   );
 }
 
-function ManualPane() {
+function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
   const [target, setTarget] = useState<"read" | "reading" | "wish">("read");
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
@@ -177,6 +213,8 @@ function ManualPane() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (target === "read" && atLimit) return;
+    
     setError("");
     setBusy(true);
     setDone("");
@@ -184,16 +222,17 @@ function ManualPane() {
       const body = JSON.stringify({ title, author, year, coverUrl, public: isPublic });
       if (target === "read") {
         await api("/api/books/manual", { method: "POST", body });
-        setDone("Added ✓ — find it in your “My Books” list.");
+        setDone('Added ✓ — find it in your "My Books" list.');
+        onBookAdded();
       } else if (target === "reading") {
         await api("/api/me/reading/manual", {
           method: "POST",
           body: JSON.stringify({ title, author, year, coverUrl }),
         });
-        setDone("Now reading ✓ — find it in “Currently reading”.");
+        setDone('Now reading ✓ — find it in "Currently reading".');
       } else {
         await api("/api/me/wishlist/manual", { method: "POST", body });
-        setDone("Saved ✓ — find it in your “Wishlist”.");
+        setDone('Saved ✓ — find it in your "Wishlist".');
       }
       setTitle("");
       setAuthor("");
@@ -243,6 +282,9 @@ function ManualPane() {
 
       {done && <div className="info">{done}</div>}
       {error && <div className="error">{error}</div>}
+      {atLimit && target === "read" && bookLimit !== null && (
+        <div className="error">You've reached the maximum of {bookLimit} books. Remove a book to add another.</div>
+      )}
 
       <form className="manual-form" onSubmit={submit}>
         <label>
@@ -298,9 +340,11 @@ function ManualPane() {
             <span className="muted">{isPublic ? "Friends can see it" : "Private"}</span>
           </div>
         )}
-        <button type="submit" disabled={busy}>
+        <button type="submit" disabled={busy || (atLimit && target === "read")}>
           {busy
             ? "Adding…"
+            : atLimit && target === "read"
+            ? "Book limit reached"
             : target === "read"
             ? "Add to My Books"
             : target === "reading"

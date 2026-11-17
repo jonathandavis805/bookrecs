@@ -6,6 +6,8 @@ import AddBook from "./components/AddBook";
 import Friends from "./components/Friends";
 import Profile from "./components/Profile";
 import BookDetail from "./components/BookDetail";
+import Settings from "./components/Settings";
+import Notifications from "./components/Notifications";
 
 type Route =
   | { name: "books" }
@@ -73,6 +75,26 @@ function Main({
   const active = route.name === "books" || route.name === "add" || route.name === "friends" 
     ? route.name 
     : null;
+  const [showSettings, setShowSettings] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const isAdmin = user.is_admin === 1;
+
+  // Fetch unread notification count for admins
+  useEffect(() => {
+    if (!isAdmin) return;
+    
+    const fetchCount = () => {
+      api<{ unreadCount: number }>("/api/notifications")
+        .then((d) => setUnreadCount(d.unreadCount))
+        .catch(() => {});
+    };
+    
+    fetchCount();
+    const interval = setInterval(fetchCount, 30000); // Poll every 30 seconds
+    return () => clearInterval(interval);
+  }, [isAdmin]);
 
   function logout() {
     api("/api/logout", { method: "POST" }).finally(onLogout);
@@ -94,10 +116,20 @@ function Main({
             Add Book
           </button>
           <button className={active === "friends" ? "active" : ""} onClick={() => onNavigate("friends")}>
-            Friends
+            My Account
           </button>
         </nav>
         <div className="userbox">
+          {isAdmin && (
+            <button
+              className="link notification-bell"
+              onClick={() => setShowNotifications(true)}
+              title="Notifications"
+            >
+              🔔
+              {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
+            </button>
+          )}
           <button className="link" onClick={() => openProfile(user.username)} title="Your profile">
             @{user.username}
           </button>
@@ -116,7 +148,13 @@ function Main({
           />
         )}
         {active === "add" && <AddBook />}
-        {active === "friends" && <Friends onOpenProfile={openProfile} />}
+        {active === "friends" && (
+          <Friends 
+            user={user} 
+            onOpenProfile={openProfile} 
+            onChangePassword={() => setShowSettings(true)} 
+          />
+        )}
         {route.name === "profile" && (
           <Profile
             key={route.username}
@@ -137,6 +175,15 @@ function Main({
           />
         )}
       </main>
+      {showSettings && (
+        <Settings onClose={() => setShowSettings(false)} />
+      )}
+      {showNotifications && isAdmin && (
+        <Notifications
+          onClose={() => setShowNotifications(false)}
+          onCountChange={setUnreadCount}
+        />
+      )}
     </div>
   );
 }

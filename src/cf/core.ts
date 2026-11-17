@@ -5,10 +5,15 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  is_admin: number;
+  status: 'pending' | 'approved' | 'rejected';
+  book_limit: number;
+  rejected_at: number | null;
+  discoverable: number;
 }
 
 export async function getUserById(db: D1Database, id: number): Promise<User | null> {
-  return await queryOne<User>(db, "SELECT id, username, email FROM users WHERE id = ?", id);
+  return await queryOne<User>(db, "SELECT id, username, email, is_admin, status, book_limit, rejected_at, discoverable FROM users WHERE id = ?", id);
 }
 
 export async function findUser(db: D1Database, identifier: string): Promise<(User & { password_hash: string }) | null> {
@@ -36,9 +41,26 @@ export async function searchUsers(db: D1Database, query: string, excludeId: numb
   const like = `%${query}%`;
   return await queryAll<{ id: number; username: string }>(
     db,
-    "SELECT id, username FROM users WHERE id != ? AND (username LIKE ? COLLATE NOCASE OR email LIKE ? COLLATE NOCASE) ORDER BY username LIMIT ?",
+    "SELECT id, username FROM users WHERE id != ? AND discoverable = 1 AND (username LIKE ? COLLATE NOCASE OR email LIKE ? COLLATE NOCASE) ORDER BY username LIMIT ?",
     excludeId, like, like, limit
   );
+}
+
+export async function discoverUsers(db: D1Database, excludeId: number, limit = 50): Promise<{ id: number; username: string }[]> {
+  return await queryAll<{ id: number; username: string }>(
+    db,
+    "SELECT id, username FROM users WHERE id != ? AND discoverable = 1 ORDER BY username LIMIT ?",
+    excludeId, limit
+  );
+}
+
+export async function setDiscoverable(db: D1Database, userId: number, discoverable: boolean): Promise<void> {
+  await execute(db, "UPDATE users SET discoverable = ? WHERE id = ?", discoverable ? 1 : 0, userId);
+}
+
+export async function getDiscoverable(db: D1Database, userId: number): Promise<boolean> {
+  const r = await queryOne<{ discoverable: number }>(db, "SELECT discoverable FROM users WHERE id = ?", userId);
+  return r?.discoverable === 1;
 }
 
 // ---------- Books ----------
@@ -920,4 +942,174 @@ export async function backfillSynopses(db: D1Database): Promise<{ updated: numbe
   }
 
   return { updated, failed };
+}
+
+// ---------- Admin features ----------
+
+const MAX_BOOKS_PER_USER = 25;
+
+export async function getUserReadCount(db: D1Database, userId: number): Promise<number> {
+  const row = await queryOne<{ count: number }>(
+    db,
+    "SELECT COUNT(*) as count FROM reads WHERE user_id = ?",
+    userId
+  );
+  return row?.count ?? 0;
+}
+
+export async function canAddMoreBooks(db: D1Database, userId: number): Promise<boolean> {
+  const user = await getUserById(db, userId);
+  if (!user) return false;
+  
+  // book_limit = 0 means unlimited
+  if (user.book_limit === 0) return true;
+  
+  const count = await getUserReadCount(db, userId);
+  return count < user.book_limit;
+}
+
+export async function getAdminUsers(db: D1Database): Promise<{ id: number; username: string }[]> {
+  return await queryAll<{ id: number; username: string }>(
+    db,
+    "SELECT id, username FROM users WHERE is_admin = 1"
+  );
+}
+
+export interface Notification {
+  id: number;
+  user_id: number;
+  type: string;
+  message: string;
+  data: string | null;
+  read: number;
+  created_at: number;
+}
+
+export async function createNotification(
+  db: D1Database,
+  userId: number,
+  type: string,
+  message: string,
+  data?: any
+): Promise<void> {
+  await execute(
+    db,
+    "INSERT INTO notifications (user_id, type, message, data) VALUES (?, ?, ?, ?)",
+    userId,
+    type,
+    message,
+    data ? JSON.stringify(data) : null
+  );
+}
+
+export async function notifyAdminsOfNewUser(
+  db: D1Database,
+  newUser: { id: number; username: string; email: string }
+): Promise<void> {
+  const admins = await getAdminUsers(db);
+  for (const admin of admins) {
+    await createNotification(
+      db,
+      admin.id,
+      "new_user_signup",
+      `New user signed up: @${newUser.username} (${newUser.email})`,
+      { userId: newUser.id, username: newUser.username, email: newUser.email }
+    );
+  }
+}
+
+export async function getNotifications(
+  db: D1Database,
+  userId: number,
+  unreadOnly = false
+): Promise<Notification[]> {
+  const query = unreadOnly
+    ? "SELECT * FROM notifications WHERE user_id = ? AND read = 0 ORDER BY created_at DESC"
+    : "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC";
+  const notifications = await queryAll<Notification>(db, query, userId);
+  
+  // For new_user_signup notifications, enrich with current user status
+  for (const n of notifications) {
+    if (n.type === "new_user_signup" && n.data) {
+      try {
+        const data = JSON.parse(n.data);
+        // Handle both 'id' and 'userId' fields for backward compatibility
+        const targetUserId = data.userId || data.id;
+        if (targetUserId) {
+          const user = await getUserById(db, targetUserId);
+          if (user) {
+            n.data = JSON.stringify({ ...data, status: user.status, rejected_at: user.rejected_at });
+          }
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+  }
+  
+  return notifications;
+}
+
+export async function getUnreadNotificationCount(db: D1Database, userId: number): Promise<number> {
+  const row = await queryOne<{ count: number }>(
+    db,
+    "SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND read = 0",
+    userId
+  );
+  return row?.count ?? 0;
+}
+
+export async function dismissNotification(db: D1Database, userId: number, notificationId: number): Promise<void> {
+  await execute(
+    db,
+    "UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?",
+    notificationId,
+    userId
+  );
+}
+
+export async function dismissAllNotifications(db: D1Database, userId: number): Promise<void> {
+  await execute(
+    db,
+    "UPDATE notifications SET read = 1 WHERE user_id = ?",
+    userId
+  );
+}
+
+export async function approveUser(db: D1Database, userId: number): Promise<void> {
+  await execute(
+    db,
+    "UPDATE users SET status = 'approved', book_limit = 0 WHERE id = ?",
+    userId
+  );
+}
+
+export async function rejectUser(db: D1Database, userId: number): Promise<void> {
+  await execute(
+    db,
+    "UPDATE users SET status = 'rejected', rejected_at = ? WHERE id = ?",
+    now(),
+    userId
+  );
+}
+
+export async function getUserBookLimit(db: D1Database, userId: number): Promise<number> {
+  const user = await getUserById(db, userId);
+  return user?.book_limit ?? 25;
+}
+
+// Grace period for rejected accounts before deletion (7 days)
+const REJECTION_GRACE_PERIOD_DAYS = 7;
+
+export async function cleanupRejectedUsers(db: D1Database): Promise<{ deleted: number }> {
+  const gracePeriodSeconds = REJECTION_GRACE_PERIOD_DAYS * 24 * 60 * 60;
+  const cutoffTime = now() - gracePeriodSeconds;
+  
+  const result = await execute(
+    db,
+    "DELETE FROM users WHERE status = 'rejected' AND rejected_at IS NOT NULL AND rejected_at < ?",
+    cutoffTime
+  );
+  
+  return { deleted: result.changes || 0 };
 }

@@ -2,6 +2,9 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  is_admin: number;
+  bookLimit: number | null; // null = unlimited
+  discoverable?: boolean;
 }
 
 export interface Book {

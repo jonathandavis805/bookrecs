@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, User } from "../api";
 
 interface Friend {
   user_id: number;
@@ -10,24 +10,41 @@ interface Request {
   user_id: number;
   username: string;
 }
+interface DiscoverableUser {
+  id: number;
+  username: string;
+}
 
-export default function Friends({ onOpenProfile }: { onOpenProfile: (username: string) => void }) {
+interface FriendsProps {
+  user: User;
+  onOpenProfile: (username: string) => void;
+  onChangePassword: () => void;
+}
+
+export default function Friends({ user, onOpenProfile, onChangePassword }: FriendsProps) {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [incoming, setIncoming] = useState<Request[]>([]);
   const [outgoing, setOutgoing] = useState<Request[]>([]);
   const [addInput, setAddInput] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [discoverable, setDiscoverable] = useState(Boolean(user.discoverable ?? true));
+  const [showDiscover, setShowDiscover] = useState(false);
+  const [discoverResults, setDiscoverResults] = useState<DiscoverableUser[]>([]);
+  const [discoverQuery, setDiscoverQuery] = useState("");
+  const [discoverLoading, setDiscoverLoading] = useState(false);
 
   async function load() {
     try {
-      const [f, r] = await Promise.all([
+      const [f, r, privacy] = await Promise.all([
         api<{ friends: Friend[] }>("/api/friends"),
         api<{ incoming: Request[]; outgoing: Request[] }>("/api/friends/requests"),
+        api<{ discoverable: boolean }>("/api/me/privacy"),
       ]);
       setFriends(f.friends);
       setIncoming(r.incoming);
       setOutgoing(r.outgoing);
+      setDiscoverable(privacy.discoverable);
     } catch (e: any) {
       setError(e.message);
     }
@@ -36,6 +53,32 @@ export default function Friends({ onOpenProfile }: { onOpenProfile: (username: s
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (!showDiscover) return;
+    setDiscoverLoading(true);
+    const q = discoverQuery.trim();
+    const path = q ? `/api/users/discover?q=${encodeURIComponent(q)}` : "/api/users/discover";
+    api<{ users: DiscoverableUser[] }>(path)
+      .then((d) => setDiscoverResults(d.users))
+      .catch(() => setDiscoverResults([]))
+      .finally(() => setDiscoverLoading(false));
+  }, [showDiscover, discoverQuery]);
+
+  async function toggleDiscoverable() {
+    const next = !discoverable;
+    setDiscoverable(next);
+    try {
+      await api("/api/me/privacy", {
+        method: "POST",
+        body: JSON.stringify({ discoverable: next }),
+      });
+      setInfo(next ? "Your profile is now visible in Discover." : "Your profile is now hidden from Discover.");
+    } catch (e: any) {
+      setDiscoverable(!next);
+      setError(e.message);
+    }
+  }
 
   async function addFriend(e: React.FormEvent) {
     e.preventDefault();
@@ -49,6 +92,21 @@ export default function Friends({ onOpenProfile }: { onOpenProfile: (username: s
       });
       setInfo(r.autoAccepted ? `You are now friends with ${r.username}!` : `Request sent to ${r.username}.`);
       setAddInput("");
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
+  async function addFriendByUsername(username: string) {
+    setError("");
+    setInfo("");
+    try {
+      const r = await api<{ username?: string; autoAccepted?: boolean }>("/api/friends/requests", {
+        method: "POST",
+        body: JSON.stringify({ usernameOrEmail: username }),
+      });
+      setInfo(r.autoAccepted ? `You are now friends with ${r.username}!` : `Request sent to ${r.username}.`);
       await load();
     } catch (err: any) {
       setError(err.message);
@@ -73,81 +131,176 @@ export default function Friends({ onOpenProfile }: { onOpenProfile: (username: s
     }
   }
 
+  const friendIds = new Set(friends.map((f) => f.user_id));
+  const outgoingIds = new Set(outgoing.map((r) => r.user_id));
+
   return (
     <div className="page">
       <div className="page-head">
-        <h2>Friends</h2>
-        <p className="muted">Add people by username or email to see what they've read.</p>
+        <h2>My Account</h2>
       </div>
 
       {error && <div className="error">{error}</div>}
       {info && <div className="info">{info}</div>}
 
-      <form className="search-bar" onSubmit={addFriend}>
-        <input
-          value={addInput}
-          onChange={(e) => setAddInput(e.target.value)}
-          placeholder="Add by username or email…"
-        />
-        <button type="submit">Add friend</button>
-      </form>
-
-      {incoming.length > 0 && (
-        <section>
-          <h3>Requests to you</h3>
-          <ul className="plain-list">
-            {incoming.map((r) => (
-              <li key={r.id} className="row">
-                <span className="username">@{r.username}</span>
-                <div className="actions">
-                  <button onClick={() => respond(r.id, "accept")}>Accept</button>
-                  <button className="danger" onClick={() => respond(r.id, "decline")}>
-                    Decline
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {outgoing.length > 0 && (
-        <section>
-          <h3>Sent (pending)</h3>
-          <ul className="plain-list">
-            {outgoing.map((r) => (
-              <li key={r.id} className="row">
-                <span className="username">@{r.username}</span>
-                <span className="muted">pending</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <section className="account-info">
+        <h3>Account Information</h3>
+        <div className="account-details">
+          <div className="detail-row">
+            <span className="detail-label">Username</span>
+            <span className="detail-value">@{user.username}</span>
+          </div>
+          <div className="detail-row">
+            <span className="detail-label">Email</span>
+            <span className="detail-value">{user.email}</span>
+          </div>
+          <div className="detail-row">
+            <span className="detail-label">Private mode</span>
+            <div className="detail-value" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!discoverable}
+                className={"switch sm" + (!discoverable ? " on" : "")}
+                onClick={toggleDiscoverable}
+              >
+                <span className="knob" />
+              </button>
+              <span className="muted" style={{ fontSize: "0.85rem" }}>
+                {discoverable ? "Off — others can find you" : "On — hidden from discovery"}
+              </span>
+            </div>
+          </div>
+          <div className="detail-row">
+            <button className="btn-link" onClick={() => onChangePassword()}>
+              Change Password
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section>
-        <h3>Your friends</h3>
-        {friends.length === 0 ? (
-          <div className="empty">
-            <p className="muted">No friends yet — add someone above.</p>
+        <h3>Friends</h3>
+        <p className="muted">Add people by username or email to see what they've read.</p>
+
+        <form className="search-bar" onSubmit={addFriend}>
+          <input
+            value={addInput}
+            onChange={(e) => setAddInput(e.target.value)}
+            placeholder="Add by username or email…"
+          />
+          <button type="submit">Add friend</button>
+        </form>
+
+        <div style={{ marginTop: "0.75rem" }}>
+          <button
+            className="btn-link"
+            onClick={() => setShowDiscover(!showDiscover)}
+          >
+            {showDiscover ? "▾ Hide Discover" : "▸ Discover Friends"}
+          </button>
+        </div>
+
+        {showDiscover && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <input
+              value={discoverQuery}
+              onChange={(e) => setDiscoverQuery(e.target.value)}
+              placeholder="Search by username…"
+              style={{ width: "100%", marginBottom: "0.5rem" }}
+            />
+            {discoverLoading ? (
+              <div className="muted">Loading…</div>
+            ) : discoverResults.length === 0 ? (
+              <div className="empty muted" style={{ padding: "0.5rem 0" }}>
+                {discoverQuery ? "No users found." : "No other users to discover."}
+              </div>
+            ) : (
+              <ul className="plain-list">
+                {discoverResults.map((u) => {
+                  const isFriend = friendIds.has(u.id);
+                  const isPending = outgoingIds.has(u.id);
+                  return (
+                    <li key={u.id} className="row">
+                      <button className="friend-link" onClick={() => onOpenProfile(u.username)}>
+                        @{u.username}
+                      </button>
+                      <div className="actions">
+                        {isFriend ? (
+                          <span className="muted">Already friends</span>
+                        ) : isPending ? (
+                          <span className="muted">Request sent</span>
+                        ) : (
+                          <button onClick={() => addFriendByUsername(u.username)}>
+                            Add friend
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
-        ) : (
-          <ul className="plain-list">
-            {friends.map((f) => (
-              <li key={f.user_id} className="row">
-                <button className="friend-link" onClick={() => onOpenProfile(f.username)}>
-                  @{f.username}
-                </button>
-                <div className="actions">
-                  <button onClick={() => onOpenProfile(f.username)}>View profile</button>
-                  <button className="danger" onClick={() => unfriend(f.user_id)}>
-                    Remove
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
         )}
+
+        {incoming.length > 0 && (
+          <section>
+            <h4>Requests to you</h4>
+            <ul className="plain-list">
+              {incoming.map((r) => (
+                <li key={r.id} className="row">
+                  <span className="username">@{r.username}</span>
+                  <div className="actions">
+                    <button onClick={() => respond(r.id, "accept")}>Accept</button>
+                    <button className="danger" onClick={() => respond(r.id, "decline")}>
+                      Decline
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {outgoing.length > 0 && (
+          <section>
+            <h4>Sent (pending)</h4>
+            <ul className="plain-list">
+              {outgoing.map((r) => (
+                <li key={r.id} className="row">
+                  <span className="username">@{r.username}</span>
+                  <span className="muted">pending</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <section>
+          <h4>Your friends</h4>
+          {friends.length === 0 ? (
+            <div className="empty">
+              <p className="muted">No friends yet — add someone above.</p>
+            </div>
+          ) : (
+            <ul className="plain-list">
+              {friends.map((f) => (
+                <li key={f.user_id} className="row">
+                  <button className="friend-link" onClick={() => onOpenProfile(f.username)}>
+                    @{f.username}
+                  </button>
+                  <div className="actions">
+                    <button onClick={() => onOpenProfile(f.username)}>View profile</button>
+                    <button className="danger" onClick={() => unfriend(f.user_id)}>
+                      Remove
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </section>
     </div>
   );

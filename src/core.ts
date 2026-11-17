@@ -5,10 +5,11 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  discoverable: number;
 }
 
 export function getUserById(id: number): User | null {
-  const r = db.query("SELECT id, username, email FROM users WHERE id = ?").get(id) as User | undefined;
+  const r = db.query("SELECT id, username, email, discoverable FROM users WHERE id = ?").get(id) as User | undefined;
   return r ?? null;
 }
 
@@ -36,8 +37,23 @@ export function emailExists(email: string): boolean {
 export function searchUsers(query: string, excludeId: number, limit = 20): { id: number; username: string }[] {
   const like = `%${query}%`;
   return db.query(
-    "SELECT id, username FROM users WHERE id != ? AND (username LIKE ? COLLATE NOCASE OR email LIKE ? COLLATE NOCASE) ORDER BY username LIMIT ?"
+    "SELECT id, username FROM users WHERE id != ? AND discoverable = 1 AND (username LIKE ? COLLATE NOCASE OR email LIKE ? COLLATE NOCASE) ORDER BY username LIMIT ?"
   ).all(excludeId, like, like, limit) as { id: number; username: string }[];
+}
+
+export function discoverUsers(excludeId: number, limit = 50): { id: number; username: string }[] {
+  return db.query(
+    "SELECT id, username FROM users WHERE id != ? AND discoverable = 1 ORDER BY username LIMIT ?"
+  ).all(excludeId, limit) as { id: number; username: string }[];
+}
+
+export function setDiscoverable(userId: number, discoverable: boolean): void {
+  db.query("UPDATE users SET discoverable = ? WHERE id = ?").run(discoverable ? 1 : 0, userId);
+}
+
+export function getDiscoverable(userId: number): boolean {
+  const r = db.query("SELECT discoverable FROM users WHERE id = ?").get(userId) as { discoverable: number } | undefined;
+  return r?.discoverable === 1;
 }
 
 // ---------- Books ----------
