@@ -166,7 +166,27 @@ export async function handleApi(req: Request): Promise<Response> {
   }
   if (path === "/api/me" && method === "GET") {
     const user = sessionUser(req) ?? bearerUser(req);
-    return json({ user });
+    if (user) {
+      return json({ 
+        user: { 
+          ...user,
+          discoverable: Boolean(user.discoverable)
+        } 
+      });
+    }
+    return json({ user: null });
+  }
+  if (path === "/api/me/privacy" && method === "GET") {
+    const user = sessionUser(req) ?? bearerUser(req);
+    if (!user) return json({ error: "Unauthorized" }, 401);
+    return json({ discoverable: core.getDiscoverable(user.id) });
+  }
+  if (path === "/api/me/privacy" && method === "POST") {
+    const user = sessionUser(req) ?? bearerUser(req);
+    if (!user) return json({ error: "Unauthorized" }, 401);
+    const { discoverable } = await readBody(req);
+    core.setDiscoverable(user.id, !!discoverable);
+    return json({ ok: true, discoverable: !!discoverable });
   }
   if (path === "/api/token" && method === "POST") {
     const user = sessionUser(req) ?? bearerUser(req);
@@ -524,6 +544,13 @@ export async function handleApi(req: Request): Promise<Response> {
     const q = (url.searchParams.get("q") ?? "").trim();
     if (!q) return json({ users: [] });
     return json({ users: core.searchUsers(q, user.id) });
+  }
+  if (path === "/api/users/discover" && method === "GET") {
+    const q = (url.searchParams.get("q") ?? "").trim();
+    if (q) {
+      return json({ users: core.searchUsers(q, user.id) });
+    }
+    return json({ users: core.discoverUsers(user.id) });
   }
 
   // ----- friends -----

@@ -9,10 +9,11 @@ export interface User {
   status: 'pending' | 'approved' | 'rejected';
   book_limit: number;
   rejected_at: number | null;
+  discoverable: number;
 }
 
 export async function getUserById(db: D1Database, id: number): Promise<User | null> {
-  return await queryOne<User>(db, "SELECT id, username, email, is_admin, status, book_limit, rejected_at FROM users WHERE id = ?", id);
+  return await queryOne<User>(db, "SELECT id, username, email, is_admin, status, book_limit, rejected_at, discoverable FROM users WHERE id = ?", id);
 }
 
 export async function findUser(db: D1Database, identifier: string): Promise<(User & { password_hash: string }) | null> {
@@ -40,9 +41,26 @@ export async function searchUsers(db: D1Database, query: string, excludeId: numb
   const like = `%${query}%`;
   return await queryAll<{ id: number; username: string }>(
     db,
-    "SELECT id, username FROM users WHERE id != ? AND (username LIKE ? COLLATE NOCASE OR email LIKE ? COLLATE NOCASE) ORDER BY username LIMIT ?",
+    "SELECT id, username FROM users WHERE id != ? AND discoverable = 1 AND (username LIKE ? COLLATE NOCASE OR email LIKE ? COLLATE NOCASE) ORDER BY username LIMIT ?",
     excludeId, like, like, limit
   );
+}
+
+export async function discoverUsers(db: D1Database, excludeId: number, limit = 50): Promise<{ id: number; username: string }[]> {
+  return await queryAll<{ id: number; username: string }>(
+    db,
+    "SELECT id, username FROM users WHERE id != ? AND discoverable = 1 ORDER BY username LIMIT ?",
+    excludeId, limit
+  );
+}
+
+export async function setDiscoverable(db: D1Database, userId: number, discoverable: boolean): Promise<void> {
+  await execute(db, "UPDATE users SET discoverable = ? WHERE id = ?", discoverable ? 1 : 0, userId);
+}
+
+export async function getDiscoverable(db: D1Database, userId: number): Promise<boolean> {
+  const r = await queryOne<{ discoverable: number }>(db, "SELECT discoverable FROM users WHERE id = ?", userId);
+  return r?.discoverable === 1;
 }
 
 // ---------- Books ----------
