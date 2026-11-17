@@ -33,6 +33,20 @@ jobs:
         run: bun run build
         working-directory: web
 
+      - name: Setup Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Run database migrations
+        if: github.event_name == 'push'
+        run: |
+          for migration in $(ls migrations/*.sql | sort); do
+            echo "Running migration: $migration"
+            wrangler d1 execute bookrecs-db --file="$migration" --remote --yes
+          done
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
