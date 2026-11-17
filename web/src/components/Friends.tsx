@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { api, User } from "../api";
+import { api, User, ReadingItem } from "../api";
 
 interface Friend {
   user_id: number;
   username: string;
+  reading: ReadingItem[];
 }
 interface Request {
   id: number;
@@ -283,16 +284,42 @@ export default function Friends({ user, refreshKey, onFriendRequestsChanged, onO
           ) : (
             <ul className="plain-list">
               {friends.map((f) => (
-                <li key={f.user_id} className="row">
-                  <button className="friend-link" onClick={() => onOpenProfile(f.username)}>
-                    @{f.username}
-                  </button>
-                  <div className="actions">
-                    <button onClick={() => onOpenProfile(f.username)}>View profile</button>
-                    <button className="danger" onClick={() => unfriend(f.user_id)}>
-                      Remove
+                <li key={f.user_id} className="friend-item">
+                  <div className="row">
+                    <button className="friend-link" onClick={() => onOpenProfile(f.username)}>
+                      @{f.username}
                     </button>
+                    <div className="actions">
+                      <button onClick={() => onOpenProfile(f.username)}>View profile</button>
+                      <button className="danger" onClick={() => unfriend(f.user_id)}>
+                        Remove
+                      </button>
+                    </div>
                   </div>
+                  {f.reading.length > 0 && (
+                    <div className="friend-reading">
+                      <span className="friend-reading-label">Reading</span>
+                      {f.reading.map((b) => (
+                        <a
+                          key={b.book_id}
+                          className="friend-reading-book"
+                          href={`#/book/${b.book_id}`}
+                          title={b.author ? `${b.title} — ${b.author}` : b.title}
+                        >
+                          {b.cover_url ? (
+                            <img className="cover sm" src={b.cover_url} alt="" />
+                          ) : (
+                            <span className="cover sm no-cover">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 2v16h12V4H6zm2 3h8v2H8V7zm0 4h8v2H8v-2z" />
+                              </svg>
+                            </span>
+                          )}
+                          <span className="friend-reading-title">{b.title}</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
