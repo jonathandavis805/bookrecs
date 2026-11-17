@@ -599,10 +599,17 @@ button.friend-link:hover {
   border: none !important;
 }
 
-.friend-item {
-  display: flex;
+.friend-row {
   flex-direction: column;
-  gap: 8px;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.friend-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .friend-reading {
@@ -610,7 +617,8 @@ button.friend-link:hover {
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
-  padding: 0 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
 }
 
 .friend-reading-label {
@@ -931,6 +939,24 @@ button.secondary:hover:not(:disabled) {
   .actions {
     width: 100%;
     justify-content: flex-end;
+  }
+  .friend-row-head {
+    flex-wrap: wrap;
+  }
+  .friend-reading {
+    gap: 8px;
+  }
+  .friend-reading-label {
+    width: 100%;
+  }
+  .friend-reading-book {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .friend-reading-title {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
   }
 }
 
