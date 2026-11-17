@@ -301,6 +301,12 @@ button.danger:hover:not(:disabled) {
 
 .search-bar input {
   flex: 1;
+  min-width: 0;
+}
+
+.search-bar button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .searching-indicator {
@@ -531,6 +537,10 @@ button.danger:hover:not(:disabled) {
   min-height: 56px;
   resize: vertical;
   font-size: 14px;
+}
+
+.review-toggle {
+  display: none;
 }
 
 .save-review {
@@ -933,12 +943,80 @@ button.secondary:hover:not(:disabled) {
 }
 
 @media (max-width: 560px) {
+  .topbar {
+    gap: 8px;
+    padding: 12px 0;
+    margin-bottom: 16px;
+  }
+  .topbar h1 {
+    font-size: 18px;
+  }
+  .topbar nav {
+    order: 3;
+    flex-basis: 100%;
+    gap: 4px;
+  }
+  .topbar nav button {
+    flex: 1;
+    padding: 8px 6px;
+    font-size: 13px;
+    border-radius: 8px;
+  }
+  .userbox {
+    margin-left: auto;
+    gap: 6px;
+  }
+  .userbox .link {
+    font-size: 13px;
+    padding: 4px 2px;
+  }
   .book-row {
     flex-wrap: wrap;
+    padding: 12px;
+    gap: 10px;
+  }
+  .book-row .cover {
+    display: none;
   }
   .actions {
     width: 100%;
     justify-content: flex-end;
+  }
+  .actions-col {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  .actions-col .danger {
+    align-self: center;
+  }
+  .public-col {
+    flex-direction: row;
+    gap: 6px;
+    margin-right: auto;
+  }
+  .review-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 5px 10px;
+    font-size: 13px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+  }
+  .review-toggle svg {
+    transition: transform 0.15s ease;
+  }
+  .review-toggle.open svg {
+    transform: rotate(180deg);
+  }
+  .review-box {
+    display: none;
+  }
+  .review-box.open {
+    display: block;
   }
   .friend-row-head {
     flex-wrap: wrap;
