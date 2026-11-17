@@ -126,7 +126,9 @@ function Main({
               onClick={() => setShowNotifications(true)}
               title="Notifications"
             >
-              🔔
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C10.343 2 9 3.343 9 5V5.29C6.716 6.144 5 8.381 5 11V16L3 18V19H21V18L19 16V11C19 8.381 17.284 6.144 15 5.29V5C15 3.343 13.657 2 12 2ZM12 4C12.552 4 13 4.448 13 5V5.065C12.672 5.021 12.34 5 12 5C11.66 5 11.328 5.021 11 5.065V5C11 4.448 11.448 4 12 4ZM10 20C10 21.105 10.895 22 12 22C13.105 22 14 21.105 14 20H10Z"/>
+              </svg>
               {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
             </button>
           )}
