@@ -284,8 +284,8 @@ export default function Friends({ user, refreshKey, onFriendRequestsChanged, onO
           ) : (
             <ul className="plain-list">
               {friends.map((f) => (
-                <li key={f.user_id} className="friend-item">
-                  <div className="row">
+                <li key={f.user_id} className="row friend-row">
+                  <div className="friend-row-head">
                     <button className="friend-link" onClick={() => onOpenProfile(f.username)}>
                       @{f.username}
                     </button>
