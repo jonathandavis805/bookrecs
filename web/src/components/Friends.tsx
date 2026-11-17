@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, User } from "../api";
 
 interface Friend {
@@ -10,7 +10,7 @@ interface Request {
   user_id: number;
   username: string;
 }
-interface DiscoverableUser {
+interface SearchableUser {
   id: number;
   username: string;
 }
@@ -26,13 +26,12 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
   const [incoming, setIncoming] = useState<Request[]>([]);
   const [outgoing, setOutgoing] = useState<Request[]>([]);
   const [addInput, setAddInput] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchableUser[]>([]);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [discoverable, setDiscoverable] = useState(Boolean(user.discoverable ?? true));
-  const [showDiscover, setShowDiscover] = useState(false);
-  const [discoverResults, setDiscoverResults] = useState<DiscoverableUser[]>([]);
-  const [discoverQuery, setDiscoverQuery] = useState("");
-  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function load() {
     try {
@@ -55,15 +54,24 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
   }, []);
 
   useEffect(() => {
-    if (!showDiscover) return;
-    setDiscoverLoading(true);
-    const q = discoverQuery.trim();
-    const path = q ? `/api/users/discover?q=${encodeURIComponent(q)}` : "/api/users/discover";
-    api<{ users: DiscoverableUser[] }>(path)
-      .then((d) => setDiscoverResults(d.users))
-      .catch(() => setDiscoverResults([]))
-      .finally(() => setDiscoverLoading(false));
-  }, [showDiscover, discoverQuery]);
+    const q = addInput.trim();
+    if (!q) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setSearching(true);
+      api<{ users: SearchableUser[] }>(`/api/users/discover?q=${encodeURIComponent(q)}`)
+        .then((d) => setSearchResults(d.users))
+        .catch(() => setSearchResults([]))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [addInput]);
 
   async function toggleDiscoverable() {
     const next = !discoverable;
@@ -181,66 +189,50 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
 
       <section>
         <h3>Friends</h3>
-        <p className="muted">Add people by username or email to see what they've read.</p>
+        <p className="muted">Search by name, email, or username to find people and add them as friends.</p>
 
         <form className="search-bar" onSubmit={addFriend}>
           <input
             value={addInput}
             onChange={(e) => setAddInput(e.target.value)}
-            placeholder="Add by username or email…"
+            placeholder="Search by name, email, or username…"
+            autoFocus
           />
           <button type="submit">Add friend</button>
         </form>
 
-        <div style={{ marginTop: "0.75rem" }}>
-          <button
-            className="btn-link"
-            onClick={() => setShowDiscover(!showDiscover)}
-          >
-            {showDiscover ? "▾ Hide Discover" : "▸ Discover Friends"}
-          </button>
-        </div>
+        {searching && <div className="muted" style={{ marginTop: "0.5rem" }}>Searching…</div>}
 
-        {showDiscover && (
-          <div style={{ marginTop: "0.75rem" }}>
-            <input
-              value={discoverQuery}
-              onChange={(e) => setDiscoverQuery(e.target.value)}
-              placeholder="Search by username…"
-              style={{ width: "100%", marginBottom: "0.5rem" }}
-            />
-            {discoverLoading ? (
-              <div className="muted">Loading…</div>
-            ) : discoverResults.length === 0 ? (
-              <div className="empty muted" style={{ padding: "0.5rem 0" }}>
-                {discoverQuery ? "No users found." : "No other users to discover."}
-              </div>
-            ) : (
-              <ul className="plain-list">
-                {discoverResults.map((u) => {
-                  const isFriend = friendIds.has(u.id);
-                  const isPending = outgoingIds.has(u.id);
-                  return (
-                    <li key={u.id} className="row">
-                      <button className="friend-link" onClick={() => onOpenProfile(u.username)}>
-                        @{u.username}
+        {searchResults.length > 0 && (
+          <ul className="plain-list" style={{ marginTop: "0.5rem" }}>
+            {searchResults.map((u) => {
+              const isFriend = friendIds.has(u.id);
+              const isPending = outgoingIds.has(u.id);
+              return (
+                <li key={u.id} className="row">
+                  <button className="friend-link" onClick={() => onOpenProfile(u.username)}>
+                    @{u.username}
+                  </button>
+                  <div className="actions">
+                    {isFriend ? (
+                      <span className="muted">Already friends</span>
+                    ) : isPending ? (
+                      <span className="muted">Request sent</span>
+                    ) : (
+                      <button onClick={() => addFriendByUsername(u.username)}>
+                        Add friend
                       </button>
-                      <div className="actions">
-                        {isFriend ? (
-                          <span className="muted">Already friends</span>
-                        ) : isPending ? (
-                          <span className="muted">Request sent</span>
-                        ) : (
-                          <button onClick={() => addFriendByUsername(u.username)}>
-                            Add friend
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {addInput.trim() && !searching && searchResults.length === 0 && (
+          <div className="empty muted" style={{ padding: "0.5rem 0" }}>
+            No users found.
           </div>
         )}
 
