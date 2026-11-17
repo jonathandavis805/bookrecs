@@ -56,8 +56,11 @@ function isMigrationApplied(filename) {
   if (!result.success) return false;
   
   try {
-    const data = JSON.parse(result.output);
-    return data.some(row => row.filename === filename);
+    const parsed = JSON.parse(result.output);
+    // Wrangler returns: [{ results: [...], success: true, ... }]
+    const data = Array.isArray(parsed) ? parsed[0] : parsed;
+    const results = data.results || [];
+    return results.some(row => row.filename === filename);
   } catch {
     return false;
   }
@@ -72,8 +75,11 @@ function columnExists(tableName, columnName) {
   if (!result.success) return false;
   
   try {
-    const data = JSON.parse(result.output);
-    return data.some(row => row.name === columnName);
+    const parsed = JSON.parse(result.output);
+    // Wrangler returns: [{ results: [...], success: true, ... }]
+    const data = Array.isArray(parsed) ? parsed[0] : parsed;
+    const results = data.results || [];
+    return results.some(row => row.name === columnName);
   } catch {
     return false;
   }
