@@ -577,6 +577,7 @@ function ReadItem({
   onRemove: () => void;
 }) {
   const controls = useDragControls();
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   return (
     <Reorder.Item
@@ -625,17 +626,29 @@ function ReadItem({
           {book.author || "Unknown author"}
           {book.first_publish_year ? ` · ${book.first_publish_year}` : ""}
         </div>
-        <textarea
-          className="review"
-          value={review}
-          placeholder="Write a review…"
-          onChange={(e) => reviewOnChange(e.target.value)}
-        />
-        {dirty && (
-          <button className="save-review" onClick={onSaveReview} disabled={saving}>
-            {saving ? "Saving…" : "Save review"}
-          </button>
-        )}
+        <button
+          type="button"
+          className={"review-toggle" + (reviewOpen ? " open" : "")}
+          onClick={() => setReviewOpen((o) => !o)}
+        >
+          {reviewOpen ? "Hide review" : review.trim() ? "Edit review" : "Add review"}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 15.5 4.5 8l1.4-1.4L12 12.7l6.1-6.1L19.5 8z" />
+          </svg>
+        </button>
+        <div className={"review-box" + (reviewOpen ? " open" : "")}>
+          <textarea
+            className="review"
+            value={review}
+            placeholder="Write a review…"
+            onChange={(e) => reviewOnChange(e.target.value)}
+          />
+          {dirty && (
+            <button className="save-review" onClick={onSaveReview} disabled={saving}>
+              {saving ? "Saving…" : "Save review"}
+            </button>
+          )}
+        </div>
       </div>
       <div className="actions actions-col">
         <div className="public-col">
