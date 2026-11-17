@@ -7,16 +7,23 @@
  * if columns already exist before attempting to add them.
  */
 
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DB_NAME = 'bookrecs-db';
 
 function runD1Command(command, options = {}) {
   const jsonFlag = options.json ? '--json' : '';
   const fileFlag = options.file ? `--file="${options.file}"` : '';
-  const cmd = `wrangler d1 execute ${DB_NAME} --remote --yes ${jsonFlag} ${fileFlag} --command="${command.replace(/"/g, '\\"')}"`;
+  const commandFlag = command ? `--command="${command.replace(/"/g, '\\"')}"` : '';
+  
+  // Don't use both --file and --command together
+  const cmd = `wrangler d1 execute ${DB_NAME} --remote --yes ${jsonFlag} ${fileFlag} ${commandFlag}`.trim();
   
   try {
     const result = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
