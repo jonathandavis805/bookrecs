@@ -818,41 +818,6 @@ export async function listFriends(db: D1Database, userId: number): Promise<{ use
   );
 }
 
-export interface FriendWithReading {
-  user_id: number;
-  username: string;
-  reading: ReadingRow[];
-}
-
-export async function listFriendsWithReading(db: D1Database, userId: number): Promise<FriendWithReading[]> {
-  const friends = await listFriends(db, userId);
-  if (friends.length === 0) return [];
-  const rows = await queryAll<ReadingRow & { user_id: number }>(
-    db,
-    `SELECT user_id, book_id, created_at, id, ol_key, title, author, cover_url, first_publish_year, manual, synopsis
-     FROM (
-       SELECT r.user_id, r.book_id, r.created_at,
-              b.id, b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual, b.synopsis,
-              ROW_NUMBER() OVER (PARTITION BY r.user_id ORDER BY r.created_at DESC, r.book_id DESC) AS rn
-       FROM reading r JOIN books b ON b.id = r.book_id
-       WHERE r.user_id IN (
-         SELECT CASE WHEN f.requester_id = ? THEN f.requestee_id ELSE f.requester_id END
-         FROM friendships f
-         WHERE (f.requester_id = ? OR f.requestee_id = ?) AND f.status = 'accepted'
-       )
-     ) WHERE rn <= 2
-     ORDER BY user_id, rn`,
-    userId, userId, userId
-  );
-  const byUser = new Map<number, ReadingRow[]>();
-  for (const { user_id, ...book } of rows) {
-    const list = byUser.get(user_id) ?? [];
-    list.push(book);
-    byUser.set(user_id, list);
-  }
-  return friends.map((f) => ({ ...f, reading: byUser.get(f.user_id) ?? [] }));
-}
-
 export async function removeFriend(db: D1Database, userId: number, friendId: number): Promise<void> {
   await execute(
     db,

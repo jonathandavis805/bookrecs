@@ -534,7 +534,7 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
 
   // ----- friends -----
   if (path === "/api/friends" && method === "GET") {
-    return json({ friends: await core.listFriendsWithReading(db, user.id) });
+    return json({ friends: await core.listFriends(db, user.id) });
   }
   if (path === "/api/friends/requests" && method === "GET") {
     return json(await core.listFriendRequests(db, user.id));
