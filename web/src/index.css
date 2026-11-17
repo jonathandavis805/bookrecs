@@ -975,6 +975,9 @@ button.secondary:hover:not(:disabled) {
     padding: 12px;
     gap: 10px;
   }
+  .book-row .cover {
+    display: none;
+  }
   .actions {
     width: 100%;
     justify-content: flex-end;
