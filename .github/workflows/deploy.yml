@@ -42,12 +42,31 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          # Create tracking table if it doesn't exist
+          wrangler d1 execute bookrecs-db --remote --yes --command="
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+              filename TEXT PRIMARY KEY,
+              applied_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )
+          "
+          
           for migration in $(ls migrations/*.sql | sort); do
-            echo "Running migration: $migration"
-            wrangler d1 execute bookrecs-db --file="$migration" --remote --yes
+            filename=$(basename "$migration")
+            # Check if already applied
+            result=$(wrangler d1 execute bookrecs-db --remote --yes --json --command="SELECT filename FROM schema_migrations WHERE filename = '$filename'")
+            
+            if echo "$result" | grep -q "\"filename\":\"$filename\""; then
+              echo "✓ Skipping $filename (already applied)"
+            else
+              echo "→ Applying $migration"
+              wrangler d1 execute bookrecs-db --file="$migration" --remote --yes
+              wrangler d1 execute bookrecs-db --remote --yes --command="INSERT INTO schema_migrations (filename) VALUES ('$filename')"
+              echo "✓ $filename applied"
+            fi
           done
 
       - name: Deploy to Cloudflare Pages
+        if: github.event_name == 'push'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
