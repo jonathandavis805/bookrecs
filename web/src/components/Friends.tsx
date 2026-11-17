@@ -10,6 +10,10 @@ interface Request {
   user_id: number;
   username: string;
 }
+interface DiscoverableUser {
+  id: number;
+  username: string;
+}
 
 interface FriendsProps {
   user: User;
@@ -24,16 +28,23 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
   const [addInput, setAddInput] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [discoverable, setDiscoverable] = useState(Boolean(user.discoverable ?? true));
+  const [showDiscover, setShowDiscover] = useState(false);
+  const [discoverResults, setDiscoverResults] = useState<DiscoverableUser[]>([]);
+  const [discoverQuery, setDiscoverQuery] = useState("");
+  const [discoverLoading, setDiscoverLoading] = useState(false);
 
   async function load() {
     try {
-      const [f, r] = await Promise.all([
+      const [f, r, privacy] = await Promise.all([
         api<{ friends: Friend[] }>("/api/friends"),
         api<{ incoming: Request[]; outgoing: Request[] }>("/api/friends/requests"),
+        api<{ discoverable: boolean }>("/api/me/privacy"),
       ]);
       setFriends(f.friends);
       setIncoming(r.incoming);
       setOutgoing(r.outgoing);
+      setDiscoverable(privacy.discoverable);
     } catch (e: any) {
       setError(e.message);
     }
@@ -42,6 +53,32 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (!showDiscover) return;
+    setDiscoverLoading(true);
+    const q = discoverQuery.trim();
+    const path = q ? `/api/users/discover?q=${encodeURIComponent(q)}` : "/api/users/discover";
+    api<{ users: DiscoverableUser[] }>(path)
+      .then((d) => setDiscoverResults(d.users))
+      .catch(() => setDiscoverResults([]))
+      .finally(() => setDiscoverLoading(false));
+  }, [showDiscover, discoverQuery]);
+
+  async function toggleDiscoverable() {
+    const next = !discoverable;
+    setDiscoverable(next);
+    try {
+      await api("/api/me/privacy", {
+        method: "POST",
+        body: JSON.stringify({ discoverable: next }),
+      });
+      setInfo(next ? "Your profile is now visible in Discover." : "Your profile is now hidden from Discover.");
+    } catch (e: any) {
+      setDiscoverable(!next);
+      setError(e.message);
+    }
+  }
 
   async function addFriend(e: React.FormEvent) {
     e.preventDefault();
@@ -55,6 +92,21 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
       });
       setInfo(r.autoAccepted ? `You are now friends with ${r.username}!` : `Request sent to ${r.username}.`);
       setAddInput("");
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
+  async function addFriendByUsername(username: string) {
+    setError("");
+    setInfo("");
+    try {
+      const r = await api<{ username?: string; autoAccepted?: boolean }>("/api/friends/requests", {
+        method: "POST",
+        body: JSON.stringify({ usernameOrEmail: username }),
+      });
+      setInfo(r.autoAccepted ? `You are now friends with ${r.username}!` : `Request sent to ${r.username}.`);
       await load();
     } catch (err: any) {
       setError(err.message);
@@ -79,6 +131,9 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
     }
   }
 
+  const friendIds = new Set(friends.map((f) => f.user_id));
+  const outgoingIds = new Set(outgoing.map((r) => r.user_id));
+
   return (
     <div className="page">
       <div className="page-head">
@@ -100,6 +155,23 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
             <span className="detail-value">{user.email}</span>
           </div>
           <div className="detail-row">
+            <span className="detail-label">Private mode</span>
+            <div className="detail-value" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!discoverable}
+                className={"switch sm" + (!discoverable ? " on" : "")}
+                onClick={toggleDiscoverable}
+              >
+                <span className="knob" />
+              </button>
+              <span className="muted" style={{ fontSize: "0.85rem" }}>
+                {discoverable ? "Off — others can find you" : "On — hidden from discovery"}
+              </span>
+            </div>
+          </div>
+          <div className="detail-row">
             <button className="btn-link" onClick={() => onChangePassword()}>
               Change Password
             </button>
@@ -119,6 +191,58 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
           />
           <button type="submit">Add friend</button>
         </form>
+
+        <div style={{ marginTop: "0.75rem" }}>
+          <button
+            className="btn-link"
+            onClick={() => setShowDiscover(!showDiscover)}
+          >
+            {showDiscover ? "▾ Hide Discover" : "▸ Discover Friends"}
+          </button>
+        </div>
+
+        {showDiscover && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <input
+              value={discoverQuery}
+              onChange={(e) => setDiscoverQuery(e.target.value)}
+              placeholder="Search by username…"
+              style={{ width: "100%", marginBottom: "0.5rem" }}
+            />
+            {discoverLoading ? (
+              <div className="muted">Loading…</div>
+            ) : discoverResults.length === 0 ? (
+              <div className="empty muted" style={{ padding: "0.5rem 0" }}>
+                {discoverQuery ? "No users found." : "No other users to discover."}
+              </div>
+            ) : (
+              <ul className="plain-list">
+                {discoverResults.map((u) => {
+                  const isFriend = friendIds.has(u.id);
+                  const isPending = outgoingIds.has(u.id);
+                  return (
+                    <li key={u.id} className="row">
+                      <button className="friend-link" onClick={() => onOpenProfile(u.username)}>
+                        @{u.username}
+                      </button>
+                      <div className="actions">
+                        {isFriend ? (
+                          <span className="muted">Already friends</span>
+                        ) : isPending ? (
+                          <span className="muted">Request sent</span>
+                        ) : (
+                          <button onClick={() => addFriendByUsername(u.username)}>
+                            Add friend
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
 
         {incoming.length > 0 && (
           <section>

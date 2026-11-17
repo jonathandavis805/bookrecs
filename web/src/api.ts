@@ -4,6 +4,7 @@ export interface User {
   email: string;
   is_admin: number;
   bookLimit: number | null; // null = unlimited
+  discoverable?: boolean;
 }
 
 export interface Book {

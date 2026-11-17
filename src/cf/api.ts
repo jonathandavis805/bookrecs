@@ -173,11 +173,24 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
       return json({ 
         user: { 
           ...user,
-          bookLimit: user.book_limit === 0 ? null : user.book_limit // null = unlimited
+          bookLimit: user.book_limit === 0 ? null : user.book_limit, // null = unlimited
+          discoverable: Boolean(user.discoverable)
         } 
       });
     }
     return json({ user: null });
+  }
+  if (path === "/api/me/privacy" && method === "GET") {
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
+    if (!user) return json({ error: "Unauthorized" }, 401);
+    return json({ discoverable: await core.getDiscoverable(db, user.id) });
+  }
+  if (path === "/api/me/privacy" && method === "POST") {
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
+    if (!user) return json({ error: "Unauthorized" }, 401);
+    const { discoverable } = await readBody(req);
+    await core.setDiscoverable(db, user.id, !!discoverable);
+    return json({ ok: true, discoverable: !!discoverable });
   }
   if (path === "/api/token" && method === "POST") {
     const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
@@ -508,6 +521,13 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const q = (url.searchParams.get("q") ?? "").trim();
     if (!q) return json({ users: [] });
     return json({ users: await core.searchUsers(db, q, user.id) });
+  }
+  if (path === "/api/users/discover" && method === "GET") {
+    const q = (url.searchParams.get("q") ?? "").trim();
+    if (q) {
+      return json({ users: await core.searchUsers(db, q, user.id) });
+    }
+    return json({ users: await core.discoverUsers(db, user.id) });
   }
 
   // ----- friends -----
