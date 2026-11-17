@@ -78,13 +78,13 @@ function Main({
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  // Bumped whenever friend requests change so the Friends page,
+  // notifications panel, and unread badge all stay in sync
+  const [friendRequestsVersion, setFriendRequestsVersion] = useState(0);
+  const bumpFriendRequests = () => setFriendRequestsVersion((v) => v + 1);
 
-  const isAdmin = user.is_admin === 1;
-
-  // Fetch unread notification count for admins
+  // Fetch unread notification count (also refetches when friend requests change)
   useEffect(() => {
-    if (!isAdmin) return;
-    
     const fetchCount = () => {
       api<{ unreadCount: number }>("/api/notifications")
         .then((d) => setUnreadCount(d.unreadCount))
@@ -94,7 +94,7 @@ function Main({
     fetchCount();
     const interval = setInterval(fetchCount, 30000); // Poll every 30 seconds
     return () => clearInterval(interval);
-  }, [isAdmin]);
+  }, [friendRequestsVersion]);
 
   function logout() {
     api("/api/logout", { method: "POST" }).finally(onLogout);
@@ -120,18 +120,16 @@ function Main({
           </button>
         </nav>
         <div className="userbox">
-          {isAdmin && (
-            <button
-              className="link notification-bell"
-              onClick={() => setShowNotifications(true)}
-              title="Notifications"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C10.343 2 9 3.343 9 5V5.29C6.716 6.144 5 8.381 5 11V16L3 18V19H21V18L19 16V11C19 8.381 17.284 6.144 15 5.29V5C15 3.343 13.657 2 12 2ZM12 4C12.552 4 13 4.448 13 5V5.065C12.672 5.021 12.34 5 12 5C11.66 5 11.328 5.021 11 5.065V5C11 4.448 11.448 4 12 4ZM10 20C10 21.105 10.895 22 12 22C13.105 22 14 21.105 14 20H10Z"/>
-              </svg>
-              {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
-            </button>
-          )}
+          <button
+            className="link notification-bell"
+            onClick={() => setShowNotifications(true)}
+            title="Notifications"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C10.343 2 9 3.343 9 5V5.29C6.716 6.144 5 8.381 5 11V16L3 18V19H21V18L19 16V11C19 8.381 17.284 6.144 15 5.29V5C15 3.343 13.657 2 12 2ZM12 4C12.552 4 13 4.448 13 5V5.065C12.672 5.021 12.34 5 12 5C11.66 5 11.328 5.021 11 5.065V5C11 4.448 11.448 4 12 4ZM10 20C10 21.105 10.895 22 12 22C13.105 22 14 21.105 14 20H10Z"/>
+            </svg>
+            {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
+          </button>
           <button className="link" onClick={() => openProfile(user.username)} title="Your profile">
             @{user.username}
           </button>
@@ -153,6 +151,8 @@ function Main({
         {active === "friends" && (
           <Friends 
             user={user} 
+            refreshKey={friendRequestsVersion}
+            onFriendRequestsChanged={bumpFriendRequests}
             onOpenProfile={openProfile} 
             onChangePassword={() => setShowSettings(true)} 
           />
@@ -180,8 +180,10 @@ function Main({
       {showSettings && (
         <Settings onClose={() => setShowSettings(false)} />
       )}
-      {showNotifications && isAdmin && (
+      {showNotifications && (
         <Notifications
+          refreshKey={friendRequestsVersion}
+          onFriendRequestsChanged={bumpFriendRequests}
           onClose={() => setShowNotifications(false)}
           onCountChange={setUnreadCount}
         />

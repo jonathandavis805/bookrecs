@@ -11,17 +11,19 @@ interface Notification {
 }
 
 interface NotificationsProps {
+  refreshKey: number;
+  onFriendRequestsChanged: () => void;
   onClose: () => void;
   onCountChange: (count: number) => void;
 }
 
-export default function Notifications({ onClose, onCountChange }: NotificationsProps) {
+export default function Notifications({ refreshKey, onFriendRequestsChanged, onClose, onCountChange }: NotificationsProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [refreshKey]);
 
   async function load() {
     try {
@@ -75,6 +77,17 @@ export default function Notifications({ onClose, onCountChange }: NotificationsP
     }
   }
 
+  async function respondToFriendRequest(requestId: number, action: "accept" | "decline", notificationId: number) {
+    try {
+      await api(`/api/friends/requests/${requestId}/${action}`, { method: "POST" });
+      setNotifications((prev) => prev.map((n) => (n.id === notificationId ? { ...n, read: 1 } : n)));
+      onCountChange(notifications.filter((n) => !n.read && n.id !== notificationId).length);
+      onFriendRequestsChanged();
+    } catch (err) {
+      console.error("Failed to respond to friend request:", err);
+    }
+  }
+
   function formatTime(timestamp: number): string {
     const date = new Date(timestamp * 1000);
     const now = new Date();
@@ -118,6 +131,7 @@ export default function Notifications({ onClose, onCountChange }: NotificationsP
                 {notifications.map((n) => {
                   const data = n.data ? JSON.parse(n.data) : null;
                   const isSignupNotification = n.type === "new_user_signup";
+                  const isFriendRequest = n.type === "friend_request";
                   const userStatus = data?.status;
                   const rejectedAt = data?.rejected_at;
                   // Handle both 'id' and 'userId' fields for backward compatibility
@@ -147,6 +161,31 @@ export default function Notifications({ onClose, onCountChange }: NotificationsP
                           </div>
                         )}
                         
+                        {/* Show status for handled friend requests */}
+                        {isFriendRequest && userStatus && userStatus !== "pending" && (
+                          <div className={`notification-status status-${userStatus === "accepted" ? "approved" : "rejected"}`}>
+                            {userStatus === "accepted" ? "✓ Accepted" : "✗ Declined"}
+                          </div>
+                        )}
+
+                        {/* Show accept/decline buttons for pending friend requests */}
+                        {isFriendRequest && !n.read && userStatus === "pending" && data?.requestId && (
+                          <div className="notification-actions">
+                            <button
+                              className="btn-small btn-success"
+                              onClick={() => respondToFriendRequest(data.requestId, "accept", n.id)}
+                            >
+                              Accept
+                            </button>
+                            <button
+                              className="btn-small btn-danger"
+                              onClick={() => respondToFriendRequest(data.requestId, "decline", n.id)}
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        )}
+
                         {/* Show approve/reject buttons only for pending users */}
                         {isSignupNotification && !n.read && userStatus === "pending" && data && targetUserId && (
                           <div className="notification-actions">

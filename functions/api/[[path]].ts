@@ -1,4 +1,4 @@
-import { handleApi } from "../../src/cf/api";
+import { handleApi } from "../../src/api";
 
 export interface Env {
   DB: D1Database;

@@ -1,57 +1,28 @@
-import { db, now } from "./db";
+import { queryOne, queryAll, execute, now } from "./db";
 
 const RATE_LIMIT_WINDOW = 15 * 60; // 15 minutes in seconds
 const MAX_ATTEMPTS = 5;
 
-interface FailedAttempt {
-  timestamp: number;
-  ip: string;
-  identifier: string;
+async function cleanup(db: D1Database): Promise<void> {
+  const cutoff = now() - RATE_LIMIT_WINDOW;
+  await execute(db, "DELETE FROM rate_limits WHERE timestamp < ?", cutoff);
 }
 
-const failedAttempts: FailedAttempt[] = [];
-
-// Clean up old entries
-function cleanup() {
+export async function isBlocked(db: D1Database, ip: string, identifier: string): Promise<boolean> {
+  await cleanup(db);
   const cutoff = now() - RATE_LIMIT_WINDOW;
-  for (let i = failedAttempts.length - 1; i >= 0; i--) {
-    if (failedAttempts[i].timestamp < cutoff) {
-      failedAttempts.splice(i, 1);
-    }
-  }
-}
-
-// Check if login should be blocked
-export function isBlocked(ip: string, identifier: string): boolean {
-  cleanup();
-  const cutoff = now() - RATE_LIMIT_WINDOW;
-  
-  // Count attempts for this IP+identifier combination
-  const attempts = failedAttempts.filter(
-    a => a.ip === ip && a.identifier === identifier && a.timestamp >= cutoff
+  const rows = await queryAll<{ cnt: number }>(
+    db,
+    "SELECT COUNT(*) as cnt FROM rate_limits WHERE ip = ? AND identifier = ? AND timestamp >= ?",
+    ip, identifier, cutoff
   );
-  
-  return attempts.length >= MAX_ATTEMPTS;
+  return (rows[0]?.cnt ?? 0) >= MAX_ATTEMPTS;
 }
 
-// Record a failed attempt
-export function recordFailedAttempt(ip: string, identifier: string) {
-  failedAttempts.push({
-    timestamp: now(),
-    ip,
-    identifier
-  });
+export async function recordFailedAttempt(db: D1Database, ip: string, identifier: string): Promise<void> {
+  await execute(db, "INSERT INTO rate_limits (ip, identifier, timestamp) VALUES (?, ?, ?)", ip, identifier, now());
 }
 
-// Clear attempts on successful login
-export function clearAttempts(ip: string, identifier: string) {
-  const cutoff = now() - RATE_LIMIT_WINDOW;
-  for (let i = failedAttempts.length - 1; i >= 0; i--) {
-    const attempt = failedAttempts[i];
-    if (attempt.timestamp < cutoff) {
-      failedAttempts.splice(i, 1);
-    } else if (attempt.ip === ip && attempt.identifier === identifier) {
-      failedAttempts.splice(i, 1);
-    }
-  }
+export async function clearAttempts(db: D1Database, ip: string, identifier: string): Promise<void> {
+  await execute(db, "DELETE FROM rate_limits WHERE ip = ? AND identifier = ?", ip, identifier);
 }

@@ -4,18 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run src/server.ts",
+    "dev": "wrangler pages dev",
     "dev:web": "cd web && bun run dev",
-    "dev:cf": "wrangler pages dev",
     "build": "cd web && bun run build",
-    "start": "bun run src/server.ts",
+    "start": "wrangler pages dev",
+    "migrate:local": "wrangler d1 migrations apply bookrecs-db --local",
     "mcp": "bun run src/mcp.ts",
-    "reset-db": "rm -f data/bookrecs.sqlite data/bookrecs.sqlite-shm data/bookrecs.sqlite-wal",
-    "demo:swipe": "npx tsx src/demo-swipe.ts",
-    "db:create": "wrangler d1 create bookrecs-db",
-    "db:migrate": "wrangler d1 execute bookrecs-db --file=migrations/0001_init.sql",
-    "db:migrate:local": "wrangler d1 execute bookrecs-db --local --file=migrations/0001_init.sql",
-    "deploy": "wrangler pages deploy web/dist"
+    "deploy": "npx wrangler deploy"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250116.0",

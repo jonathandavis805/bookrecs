@@ -17,11 +17,13 @@ interface SearchableUser {
 
 interface FriendsProps {
   user: User;
+  refreshKey: number;
+  onFriendRequestsChanged: () => void;
   onOpenProfile: (username: string) => void;
   onChangePassword: () => void;
 }
 
-export default function Friends({ user, onOpenProfile, onChangePassword }: FriendsProps) {
+export default function Friends({ user, refreshKey, onFriendRequestsChanged, onOpenProfile, onChangePassword }: FriendsProps) {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [incoming, setIncoming] = useState<Request[]>([]);
   const [outgoing, setOutgoing] = useState<Request[]>([]);
@@ -51,7 +53,7 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
 
   useEffect(() => {
     load();
-  }, []);
+  }, [refreshKey]);
 
   useEffect(() => {
     const q = addInput.trim();
@@ -101,6 +103,7 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
       setInfo(r.autoAccepted ? `You are now friends with ${r.username}!` : `Request sent to ${r.username}.`);
       setAddInput("");
       await load();
+      onFriendRequestsChanged();
     } catch (err: any) {
       setError(err.message);
     }
@@ -116,6 +119,7 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
       });
       setInfo(r.autoAccepted ? `You are now friends with ${r.username}!` : `Request sent to ${r.username}.`);
       await load();
+      onFriendRequestsChanged();
     } catch (err: any) {
       setError(err.message);
     }
@@ -125,6 +129,7 @@ export default function Friends({ user, onOpenProfile, onChangePassword }: Frien
     try {
       await api(`/api/friends/requests/${id}/${action}`, { method: "POST" });
       await load();
+      onFriendRequestsChanged();
     } catch (e: any) {
       setError(e.message);
     }

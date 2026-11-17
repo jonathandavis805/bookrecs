@@ -1,9 +1,9 @@
-import { db } from "./db";
 import * as auth from "./auth";
 import * as core from "./core";
-import { searchBooks } from "./ol";
 import * as ratelimit from "./ratelimit";
 import * as twofa from "./twofa";
+import { searchBooks } from "./ol";
+import { execute, queryOne, now } from "./db";
 
 const SESSION_COOKIE = "session";
 const SESSION_TTL = 60 * 60 * 24 * 30;
@@ -37,44 +37,38 @@ async function readBody(req: Request): Promise<any> {
 }
 
 function getClientIp(req: Request): string {
-  // Check X-Forwarded-For first (for reverse proxies like cloudflared)
   const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) {
-    return forwarded.split(",")[0].trim();
-  }
-  // Check CF-Connecting-IP (Cloudflare specific)
+  if (forwarded) return forwarded.split(",")[0].trim();
   const cloudflare = req.headers.get("cf-connecting-ip");
-  if (cloudflare) {
-    return cloudflare;
-  }
-  // Fallback to a generic identifier
+  if (cloudflare) return cloudflare;
   return "unknown";
 }
 
-function sessionUser(req: Request): core.User | null {
+async function sessionUser(db: D1Database, req: Request): Promise<core.User | null> {
   const token = getCookie(req, SESSION_COOKIE);
   if (!token) return null;
-  const id = auth.getUserIdByToken(token);
-  return id ? core.getUserById(id) : null;
+  const id = await auth.getUserIdByToken(db, token);
+  return id ? await core.getUserById(db, id) : null;
 }
 
-function bearerUser(req: Request): core.User | null {
+async function bearerUser(db: D1Database, req: Request): Promise<core.User | null> {
   const h = req.headers.get("authorization");
   if (!h || !h.toLowerCase().startsWith("bearer ")) return null;
   const token = h.slice(7).trim();
-  const row = db.query("SELECT id FROM users WHERE api_token = ?").get(token) as { id: number } | undefined;
-  return row ? core.getUserById(row.id) : null;
+  const row = await queryOne<{ id: number }>(db, "SELECT id FROM users WHERE api_token = ?", token);
+  return row ? await core.getUserById(db, row.id) : null;
 }
 
 function setSessionCookie(token: string, req: Request): string {
   const host = req.headers.get("host") || "localhost";
   const protocol = req.headers.get("x-forwarded-proto") || "http";
-  const isSecure = protocol === "https" || host.includes("bookrecs.dev");
-  
-  const secureFlag = isSecure ? "Secure; " : "";
+  const isSecure = protocol === "https" || host.includes("bookrecs.dev") || host.includes(".pages.dev");
+
+  // SameSite=None requires Secure; browsers reject it over plain http (local dev).
+  // Use Lax locally — same-origin requests still send the cookie.
+  const sameSite = isSecure ? "SameSite=None; Secure; " : "SameSite=Lax; ";
   const domain = host.includes("bookrecs.dev") ? "; Domain=bookrecs.dev" : "";
-  
-  return `${SESSION_COOKIE}=${token}; HttpOnly; ${secureFlag}Path=/${domain}; SameSite=None; Max-Age=${SESSION_TTL}`;
+  return `${SESSION_COOKIE}=${token}; HttpOnly; ${sameSite}Path=/${domain}; Max-Age=${SESSION_TTL}`;
 }
 
 function validUsername(u: unknown): u is string {
@@ -87,65 +81,76 @@ function validPassword(p: unknown): p is string {
   return typeof p === "string" && p.length >= 8;
 }
 
-async function handleSignup(username: unknown, email: unknown, password: unknown, req: Request): Promise<Response> {
+async function handleSignup(db: D1Database, username: unknown, email: unknown, password: unknown, req: Request): Promise<Response> {
   if (!validUsername(username)) return json({ error: "Username must be 3-32 chars (letters, numbers, underscore)" }, 400);
   if (!validEmail(email)) return json({ error: "Enter a valid email address" }, 400);
   if (!validPassword(password)) return json({ error: "Password must be at least 8 characters" }, 400);
-  if (core.usernameExists(username)) return json({ error: "That username is taken" }, 409);
-  if (core.emailExists(email)) return json({ error: "That email is already registered" }, 409);
+  if (await core.usernameExists(db, username)) return json({ error: "That username is taken" }, 409);
+  if (await core.emailExists(db, email)) return json({ error: "That email is already registered" }, 409);
 
   const hash = await auth.hashPassword(password);
-  const user = core.createUser(username, email, hash);
-  const token = auth.createSession(user.id);
-  return json({ user }, 200, { "set-cookie": setSessionCookie(token, req) });
+  const user = await core.createUser(db, username, email, hash);
+  
+  // Notify admins of new user signup (with user ID for approve/reject)
+  const admins = await core.getAdminUsers(db);
+  for (const admin of admins) {
+    await core.createNotification(
+      db,
+      admin.id,
+      "new_user_signup",
+      `New user signed up: ${user.username} (${user.email})`,
+      { id: user.id, username: user.username, email: user.email }
+    );
+  }
+  
+  const token = await auth.createSession(db, user.id);
+  return json({ 
+    user: { 
+      ...user,
+      bookLimit: user.book_limit === 0 ? null : user.book_limit
+    } 
+  }, 200, { "set-cookie": setSessionCookie(token, req) });
 }
 
-async function handleLogin(usernameOrEmail: unknown, password: unknown, req: Request): Promise<Response> {
+async function handleLogin(db: D1Database, usernameOrEmail: unknown, password: unknown, req: Request): Promise<Response> {
   if (typeof usernameOrEmail !== "string" || !usernameOrEmail.trim() || typeof password !== "string" || !password) {
     return json({ error: "Username/email and password are required" }, 400);
   }
 
-  // Check rate limiting
   const ip = getClientIp(req);
   const identifier = usernameOrEmail.trim();
-  
-  if (ratelimit.isBlocked(ip, identifier)) {
-    return json({ 
-      error: "Too many failed login attempts. Please try again in 15 minutes." 
-    }, 429);
+
+  if (await ratelimit.isBlocked(db, ip, identifier)) {
+    return json({ error: "Too many failed login attempts. Please try again in 15 minutes." }, 429);
   }
 
-  const u = core.findUser(usernameOrEmail.trim());
+  const u = await core.findUser(db, usernameOrEmail.trim());
   if (!u) {
-    ratelimit.recordFailedAttempt(ip, identifier);
+    await ratelimit.recordFailedAttempt(db, ip, identifier);
     return json({ error: "Invalid credentials" }, 401);
   }
-  
+
   const ok = await auth.verifyPassword(password, u.password_hash);
   if (!ok) {
-    ratelimit.recordFailedAttempt(ip, identifier);
+    await ratelimit.recordFailedAttempt(db, ip, identifier);
     return json({ error: "Invalid credentials" }, 401);
   }
-  
-  // Check if 2FA is enabled
-  if (twofa.has2FAEnabled(u.id)) {
-    // Return pending login token (valid for 5 minutes)
+
+  if (await twofa.has2FAEnabled(db, u.id)) {
     const pendingToken = auth.randomToken(24);
-    db.query("INSERT INTO pending_logins (token, user_id, expires_at) VALUES (?, ?, ?)")
-      .run(pendingToken, u.id, now() + 300);
+    await execute(db, "INSERT INTO pending_logins (token, user_id, expires_at) VALUES (?, ?, ?)", pendingToken, u.id, now() + 300);
     return json({ requires2FA: true, pendingToken });
   }
-  
-  // Clear rate limit on successful login
-  ratelimit.clearAttempts(ip, identifier);
-  
-  const token = auth.createSession(u.id);
-  return json({ user: { id: u.id, username: u.username, email: u.email } }, 200, {
+
+  await ratelimit.clearAttempts(db, ip, identifier);
+
+  const token = await auth.createSession(db, u.id);
+  return json({ user: { id: u.id, username: u.username, email: u.email, is_admin: u.is_admin } }, 200, {
     "set-cookie": setSessionCookie(token, req),
   });
 }
 
-export async function handleApi(req: Request): Promise<Response> {
+export async function handleApi(db: D1Database, req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
   const method = req.method;
@@ -153,23 +158,24 @@ export async function handleApi(req: Request): Promise<Response> {
   // ----- auth -----
   if (path === "/api/signup" && method === "POST") {
     const { username, email, password } = await readBody(req);
-    return handleSignup(username, email, password, req);
+    return handleSignup(db, username, email, password, req);
   }
   if (path === "/api/login" && method === "POST") {
     const { usernameOrEmail, password } = await readBody(req);
-    return handleLogin(usernameOrEmail, password, req);
+    return handleLogin(db, usernameOrEmail, password, req);
   }
   if (path === "/api/logout" && method === "POST") {
     const token = getCookie(req, SESSION_COOKIE);
-    if (token) auth.deleteSession(token);
+    if (token) await auth.deleteSession(db, token);
     return json({ ok: true });
   }
   if (path === "/api/me" && method === "GET") {
-    const user = sessionUser(req) ?? bearerUser(req);
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
     if (user) {
       return json({ 
         user: { 
           ...user,
+          bookLimit: user.book_limit === 0 ? null : user.book_limit, // null = unlimited
           discoverable: Boolean(user.discoverable)
         } 
       });
@@ -177,71 +183,64 @@ export async function handleApi(req: Request): Promise<Response> {
     return json({ user: null });
   }
   if (path === "/api/me/privacy" && method === "GET") {
-    const user = sessionUser(req) ?? bearerUser(req);
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
     if (!user) return json({ error: "Unauthorized" }, 401);
-    return json({ discoverable: core.getDiscoverable(user.id) });
+    return json({ discoverable: await core.getDiscoverable(db, user.id) });
   }
   if (path === "/api/me/privacy" && method === "POST") {
-    const user = sessionUser(req) ?? bearerUser(req);
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
     if (!user) return json({ error: "Unauthorized" }, 401);
     const { discoverable } = await readBody(req);
-    core.setDiscoverable(user.id, !!discoverable);
+    await core.setDiscoverable(db, user.id, !!discoverable);
     return json({ ok: true, discoverable: !!discoverable });
   }
   if (path === "/api/token" && method === "POST") {
-    const user = sessionUser(req) ?? bearerUser(req);
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
     if (!user) return json({ error: "Unauthorized" }, 401);
     const token = auth.randomToken(24);
-    db.query("UPDATE users SET api_token = ? WHERE id = ?").run(token, user.id);
+    await execute(db, "UPDATE users SET api_token = ? WHERE id = ?", token, user.id);
     return json({ token });
   }
 
   // ----- 2FA setup -----
   if (path === "/api/2fa/setup" && method === "POST") {
-    const user = sessionUser(req) ?? bearerUser(req);
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
     if (!user) return json({ error: "Unauthorized" }, 401);
-    
+
     const secret = twofa.generateSecret();
     const uri = twofa.generateTOTPUri(user.username, secret);
-    
-    // Store secret temporarily (not enabled yet)
-    db.query('UPDATE users SET "2fa_secret" = ? WHERE id = ?').run(secret, user.id);
-    
+    await execute(db, 'UPDATE users SET "2fa_secret" = ? WHERE id = ?', secret, user.id);
     return json({ secret, uri });
   }
 
   if (path === "/api/2fa/verify" && method === "POST") {
-    const user = sessionUser(req) ?? bearerUser(req);
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
     if (!user) return json({ error: "Unauthorized" }, 401);
-    
+
     const { token } = await readBody(req);
     if (!token) return json({ error: "Token required" }, 400);
-    
-    const secret = twofa.get2FASecret(user.id);
+
+    const secret = await twofa.get2FASecret(db, user.id);
     if (!secret) return json({ error: "No 2FA setup in progress" }, 400);
-    
-    const valid = twofa.verifyTOTP(user.username, secret, token);
+
+    const valid = await twofa.verifyTOTP(user.username, secret, token);
     if (!valid) return json({ error: "Invalid token" }, 400);
-    
-    // Enable 2FA
-    twofa.enable2FA(user.id, secret);
-    
+
+    await twofa.enable2FA(db, user.id, secret);
     return json({ ok: true });
   }
 
   if (path === "/api/2fa/disable" && method === "POST") {
-    const user = sessionUser(req) ?? bearerUser(req);
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
     if (!user) return json({ error: "Unauthorized" }, 401);
-    
-    twofa.disable2FA(user.id);
+    await twofa.disable2FA(db, user.id);
     return json({ ok: true });
   }
 
   if (path === "/api/2fa/status" && method === "GET") {
-    const user = sessionUser(req) ?? bearerUser(req);
+    const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
     if (!user) return json({ error: "Unauthorized" }, 401);
-    
-    return json(twofa.get2FAStatus(user.id));
+    return json(await twofa.get2FAStatus(db, user.id));
   }
 
   if (path === "/api/2fa/login" && method === "POST") {
@@ -249,45 +248,38 @@ export async function handleApi(req: Request): Promise<Response> {
     if (!pendingToken || !totpToken) {
       return json({ error: "pendingToken and totpToken required" }, 400);
     }
-    
-    // Get pending login
-    const pending = db.query("SELECT user_id, expires_at FROM pending_logins WHERE token = ?")
-      .get(pendingToken) as { user_id: number; expires_at: number } | undefined;
-    
+
+    const pending = await queryOne<{ user_id: number; expires_at: number }>(
+      db,
+      "SELECT user_id, expires_at FROM pending_logins WHERE token = ?",
+      pendingToken
+    );
+
     if (!pending || pending.expires_at < now()) {
       if (pending) {
-        db.query("DELETE FROM pending_logins WHERE token = ?").run(pendingToken);
+        await execute(db, "DELETE FROM pending_logins WHERE token = ?", pendingToken);
       }
       return json({ error: "Invalid or expired pending token" }, 400);
     }
-    
-    // Verify TOTP
-    const user = core.getUserById(pending.user_id);
-    if (!user) {
-      return json({ error: "User not found" }, 404);
-    }
-    
-    const secret = twofa.get2FASecret(pending.user_id);
-    if (!secret) {
-      return json({ error: "2FA not configured" }, 400);
-    }
-    
-    const valid = twofa.verifyTOTP(user.username, secret, totpToken);
-    if (!valid) {
-      return json({ error: "Invalid 2FA token" }, 400);
-    }
-    
-    // Delete pending login
-    db.query("DELETE FROM pending_logins WHERE token = ?").run(pendingToken);
-    
-    // Create session
-    const token = auth.createSession(user.id);
+
+    const user = await core.getUserById(db, pending.user_id);
+    if (!user) return json({ error: "User not found" }, 404);
+
+    const secret = await twofa.get2FASecret(db, pending.user_id);
+    if (!secret) return json({ error: "2FA not configured" }, 400);
+
+    const valid = await twofa.verifyTOTP(user.username, secret, totpToken);
+    if (!valid) return json({ error: "Invalid 2FA token" }, 400);
+
+    await execute(db, "DELETE FROM pending_logins WHERE token = ?", pendingToken);
+
+    const token = await auth.createSession(db, user.id);
     return json({ user: { id: user.id, username: user.username, email: user.email } }, 200, {
       "set-cookie": setSessionCookie(token, req),
     });
   }
 
-  const user = sessionUser(req) ?? bearerUser(req);
+  const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
   if (!user) return json({ error: "Unauthorized" }, 401);
 
   // ----- book search & add -----
@@ -296,10 +288,8 @@ export async function handleApi(req: Request): Promise<Response> {
     if (!q) return json({ results: [] });
     try {
       const results = await searchBooks(q);
-      // Check which books already exist in the database (added by someone)
       const keys = results.map(r => r.key);
-      const existingKeys = core.getExistingBookKeys(keys);
-      // Sort results: books that exist in the database come first
+      const existingKeys = await core.getExistingBookKeys(db, keys);
       const sorted = results.sort((a, b) => {
         const aExists = existingKeys.has(a.key);
         const bExists = existingKeys.has(b.key);
@@ -307,22 +297,17 @@ export async function handleApi(req: Request): Promise<Response> {
         if (!aExists && bExists) return 1;
         return 0;
       });
-      // Add the 'added' flag to each result
-      const resultsWithFlag = sorted.map(r => ({
-        ...r,
-        added: existingKeys.has(r.key)
-      }));
+      const resultsWithFlag = sorted.map(r => ({ ...r, added: existingKeys.has(r.key) }));
       return json({ results: resultsWithFlag });
     } catch (e) {
       return json({ error: "Open Library is unavailable right now", detail: String(e) }, 502);
     }
   }
 
-  // Get book details with friend activity
   const bookDetailMatch = path.match(/^\/api\/books\/(\d+)$/);
   if (bookDetailMatch && method === "GET") {
     const bookId = Number(bookDetailMatch[1]);
-    const detail = core.getBookDetail(user.id, bookId);
+    const detail = await core.getBookDetail(db, user.id, bookId);
     if (!detail) return json({ error: "Book not found" }, 404);
     return json({ book: detail });
   }
@@ -334,15 +319,14 @@ export async function handleApi(req: Request): Promise<Response> {
     if (!cover_url || typeof cover_url !== "string") {
       return json({ error: "Cover URL is required" }, 400);
     }
-    const updated = core.setBookCover(bookId, cover_url);
+    const updated = await core.setBookCover(db, bookId, cover_url);
     if (!updated) return json({ error: "Book not found" }, 404);
     return json({ book: updated });
   }
 
-  // Backfill synopses from Open Library
   if (path === "/api/books/backfill-synopses" && method === "POST") {
     try {
-      const result = await core.backfillSynopses();
+      const result = await core.backfillSynopses(db);
       return json(result);
     } catch (e) {
       return json({ error: "Failed to backfill synopses", detail: String(e) }, 500);
@@ -351,40 +335,50 @@ export async function handleApi(req: Request): Promise<Response> {
 
   if (path === "/api/books/manual" && method === "POST") {
     const { title, author, year, coverUrl, review, rank, public: isPublic } = await readBody(req);
-    const r = core.addManualBook(
-      user.id,
+    
+    // Check if user has reached the book limit
+    if (!(await core.canAddMoreBooks(db, user.id))) {
+      const limit = await core.getUserBookLimit(db, user.id);
+      return json({ error: `You have reached the maximum of ${limit} books` }, 400);
+    }
+    
+    const r = await core.addManualBook(
+      db, user.id,
       { title, author, year: year != null && year !== "" ? Number(year) : undefined, coverUrl },
-      review,
-      rank,
-      isPublic
+      review, rank, isPublic
     );
     if (r.error) return json({ error: r.error }, 400);
-    return json({ book: r.book, books: core.listReads(user.id) });
+    return json({ book: r.book, books: await core.listReads(db, user.id) });
   }
 
   if (path === "/api/books" && method === "POST") {
     const { ol_key, review, rank, year, public: isPublic } = await readBody(req);
-    const r = await core.addRead(user.id, ol_key, review, rank, year, isPublic);
+    
+    // Check if user has reached the book limit
+    if (!(await core.canAddMoreBooks(db, user.id))) {
+      const limit = await core.getUserBookLimit(db, user.id);
+      return json({ error: `You have reached the maximum of ${limit} books` }, 400);
+    }
+    
+    const r = await core.addRead(db, user.id, ol_key, review, rank, year, isPublic);
     if (r.error) return json({ error: r.error }, 400);
-    return json({ book: r.book, books: core.listReads(user.id) });
+    return json({ book: r.book, books: await core.listReads(db, user.id) });
   }
 
   if (path === "/api/me/books" && method === "GET") {
-    const books = core.listReads(user.id);
-    const readingSet = new Set(
-      core.listReading(user.id).map(b => b.book_id)
-    );
-    const booksWithReadingStatus = books.map(b => ({
-      ...b,
-      isReading: readingSet.has(b.book_id)
-    }));
-    return json({ books: booksWithReadingStatus });
+    const books = await core.listReads(db, user.id);
+    const reading = await core.listReading(db, user.id);
+    const readingSet = new Set(reading.map(b => b.book_id));
+    const booksWithReadingStatus = books.map(b => ({ ...b, isReading: readingSet.has(b.book_id) }));
+    const bookCount = await core.getUserReadCount(db, user.id);
+    const bookLimit = await core.getUserBookLimit(db, user.id);
+    return json({ books: booksWithReadingStatus, bookCount, maxBooks: bookLimit });
   }
 
   if (path === "/api/me/books/reorder" && method === "POST") {
     const { ordered } = await readBody(req);
-    core.reorderReads(user.id, Array.isArray(ordered) ? ordered.map(Number) : []);
-    return json({ books: core.listReads(user.id) });
+    await core.reorderReads(db, user.id, Array.isArray(ordered) ? ordered.map(Number) : []);
+    return json({ books: await core.listReads(db, user.id) });
   }
 
   const bookMatch = path.match(/^\/api\/me\/books\/(\d+)$/);
@@ -393,15 +387,15 @@ export async function handleApi(req: Request): Promise<Response> {
     if (method === "PATCH") {
       const { review, rank } = await readBody(req);
       if (rank != null) {
-        const r = core.setRank(user.id, bookId, Number(rank));
+        const r = await core.setRank(db, user.id, bookId, Number(rank));
         if (r.error) return json({ error: r.error }, 400);
       }
-      if (typeof review === "string") core.setReview(user.id, bookId, review);
-      return json({ books: core.listReads(user.id) });
+      if (typeof review === "string") await core.setReview(db, user.id, bookId, review);
+      return json({ books: await core.listReads(db, user.id) });
     }
     if (method === "DELETE") {
-      core.removeRead(user.id, bookId);
-      return json({ books: core.listReads(user.id) });
+      await core.removeRead(db, user.id, bookId);
+      return json({ books: await core.listReads(db, user.id) });
     }
     return json({ error: "Method not allowed" }, 405);
   }
@@ -409,160 +403,145 @@ export async function handleApi(req: Request): Promise<Response> {
   const readPublic = path.match(/^\/api\/me\/books\/(\d+)\/public$/);
   if (readPublic && method === "POST") {
     const { public: isPublic } = await readBody(req);
-    const r = core.setReadPublic(user.id, Number(readPublic[1]), !!isPublic);
+    const r = await core.setReadPublic(db, user.id, Number(readPublic[1]), !!isPublic);
     if (r.error) return json({ error: r.error }, 400);
-    return json({ books: core.listReads(user.id) });
+    return json({ books: await core.listReads(db, user.id) });
   }
 
-  // ----- wishlist (self) -----
+  // ----- wishlist -----
   if (path === "/api/me/next-up" && method === "GET") {
-    return json({ books: core.getNextUp(user.id) });
+    return json({ books: await core.getNextUp(db, user.id) });
   }
   if (path === "/api/me/wishlist" && method === "GET") {
-    return json({ books: core.listWishlist(user.id) });
+    return json({ books: await core.listWishlist(db, user.id) });
   }
   if (path === "/api/me/wishlist" && method === "POST") {
     const { ol_key, book_id, owned, public: isPublic, year, rank } = await readBody(req);
     if (book_id != null) {
-      const r = core.addToWishlistByBookId(user.id, Number(book_id), !!owned, !!isPublic, rank);
+      const r = await core.addToWishlistByBookId(db, user.id, Number(book_id), !!owned, !!isPublic, rank);
       if (r.error) return json({ error: r.error }, 400);
-      return json({ book: r.book, books: core.listWishlist(user.id) });
+      return json({ book: r.book, books: await core.listWishlist(db, user.id) });
     }
-    const r = await core.addToWishlistByOlKey(user.id, ol_key, !!owned, year, !!isPublic, rank);
+    const r = await core.addToWishlistByOlKey(db, user.id, ol_key, !!owned, year, !!isPublic, rank);
     if (r.error) return json({ error: r.error }, 400);
-    return json({ book: r.book, books: core.listWishlist(user.id) });
+    return json({ book: r.book, books: await core.listWishlist(db, user.id) });
   }
   if (path === "/api/me/wishlist/manual" && method === "POST") {
     const { title, author, year, coverUrl, owned, public: isPublic, rank } = await readBody(req);
-    const r = core.addManualToWishlist(
-      user.id,
-      {
-        title,
-        author,
-        year: year != null && year !== "" ? Number(year) : undefined,
-        coverUrl,
-      },
-      !!owned,
-      !!isPublic,
-      rank
+    const r = await core.addManualToWishlist(
+      db, user.id,
+      { title, author, year: year != null && year !== "" ? Number(year) : undefined, coverUrl },
+      !!owned, !!isPublic, rank
     );
     if (r.error) return json({ error: r.error }, 400);
-    return json({ book: r.book, books: core.listWishlist(user.id) });
+    return json({ book: r.book, books: await core.listWishlist(db, user.id) });
   }
   if (path === "/api/me/wishlist/reorder" && method === "POST") {
     const { ordered } = await readBody(req);
-    core.reorderWishlist(user.id, Array.isArray(ordered) ? ordered.map(Number) : []);
-    return json({ books: core.listWishlist(user.id) });
+    await core.reorderWishlist(db, user.id, Array.isArray(ordered) ? ordered.map(Number) : []);
+    return json({ books: await core.listWishlist(db, user.id) });
   }
   const wishPublic = path.match(/^\/api\/me\/wishlist\/(\d+)\/public$/);
   if (wishPublic && method === "POST") {
     const { public: isPublic } = await readBody(req);
-    const r = core.setWishPublic(user.id, Number(wishPublic[1]), !!isPublic);
+    const r = await core.setWishPublic(db, user.id, Number(wishPublic[1]), !!isPublic);
     if (r.error) return json({ error: r.error }, 400);
-    return json({ books: core.listWishlist(user.id) });
+    return json({ books: await core.listWishlist(db, user.id) });
   }
   const wishMove = path.match(/^\/api\/me\/wishlist\/(\d+)\/move-to-read$/);
   if (wishMove && method === "POST") {
     const { review, rank } = await readBody(req);
-    const r = core.moveToRead(user.id, Number(wishMove[1]), review, rank);
+    const r = await core.moveToRead(db, user.id, Number(wishMove[1]), review, rank);
     if (r.error) return json({ error: r.error }, 400);
-    return json({ ok: true, books: core.listWishlist(user.id), readBooks: core.listReads(user.id) });
+    return json({ ok: true, books: await core.listWishlist(db, user.id), readBooks: await core.listReads(db, user.id) });
   }
   const wishOwned = path.match(/^\/api\/me\/wishlist\/(\d+)\/owned$/);
   if (wishOwned && method === "POST") {
     const { owned } = await readBody(req);
-    const r = core.setOwned(user.id, Number(wishOwned[1]), !!owned);
+    const r = await core.setOwned(db, user.id, Number(wishOwned[1]), !!owned);
     if (r.error) return json({ error: r.error }, 400);
-    return json({ books: core.listWishlist(user.id) });
+    return json({ books: await core.listWishlist(db, user.id) });
   }
   const wishMatch = path.match(/^\/api\/me\/wishlist\/(\d+)$/);
   if (wishMatch && method === "DELETE") {
-    core.removeFromWishlist(user.id, Number(wishMatch[1]));
-    return json({ books: core.listWishlist(user.id) });
+    await core.removeFromWishlist(db, user.id, Number(wishMatch[1]));
+    return json({ books: await core.listWishlist(db, user.id) });
   }
 
-  // ----- currently reading (always visible to friends) -----
+  // ----- currently reading -----
   if (path === "/api/me/reading" && method === "GET") {
-    return json({ books: core.listReading(user.id) });
+    return json({ books: await core.listReading(db, user.id) });
   }
   if (path === "/api/me/reading" && method === "POST") {
     const { ol_key, book_id, year } = await readBody(req);
     if (book_id != null) {
-      const r = core.addToReadingByBookId(user.id, Number(book_id));
+      const r = await core.addToReadingByBookId(db, user.id, Number(book_id));
       if (r.error) return json({ error: r.error }, 400);
-      return json({ book: r.book, books: core.listReading(user.id) });
+      return json({ book: r.book, books: await core.listReading(db, user.id) });
     }
-    const r = await core.addToReadingByOlKey(user.id, ol_key, year);
+    const r = await core.addToReadingByOlKey(db, user.id, ol_key, year);
     if (r.error) return json({ error: r.error }, 400);
-    return json({ book: r.book, books: core.listReading(user.id) });
+    return json({ book: r.book, books: await core.listReading(db, user.id) });
   }
   if (path === "/api/me/reading/from-wishlist" && method === "POST") {
     const { book_id } = await readBody(req);
-    const r = core.moveFromWishlistToReading(user.id, Number(book_id));
+    const r = await core.moveFromWishlistToReading(db, user.id, Number(book_id));
     if (r.error) return json({ error: r.error }, 400);
-    return json({ book: r.book, books: core.listReading(user.id), wishBooks: core.listWishlist(user.id) });
+    return json({ book: r.book, books: await core.listReading(db, user.id), wishBooks: await core.listWishlist(db, user.id) });
   }
   if (path === "/api/me/reading/manual" && method === "POST") {
     const { title, author, year, coverUrl } = await readBody(req);
-    const r = core.addManualToReading(user.id, {
-      title,
-      author,
+    const r = await core.addManualToReading(db, user.id, {
+      title, author,
       year: year != null && year !== "" ? Number(year) : undefined,
       coverUrl,
     });
     if (r.error) return json({ error: r.error }, 400);
-    return json({ book: r.book, books: core.listReading(user.id) });
+    return json({ book: r.book, books: await core.listReading(db, user.id) });
   }
   const readingFinish = path.match(/^\/api\/me\/reading\/(\d+)\/finish$/);
   if (readingFinish && method === "POST") {
     const { review, rank } = await readBody(req);
-    const r = core.finishReading(user.id, Number(readingFinish[1]), review, rank);
+    const r = await core.finishReading(db, user.id, Number(readingFinish[1]), review, rank);
     if (r.error) return json({ error: r.error }, 400);
-    return json({ ok: true, readBooks: core.listReads(user.id) });
+    return json({ ok: true, readBooks: await core.listReads(db, user.id) });
   }
   const readingBack = path.match(/^\/api\/me\/reading\/(\d+)\/back-to-wishlist$/);
   if (readingBack && method === "POST") {
-    const r = core.backToWishlist(user.id, Number(readingBack[1]));
+    const r = await core.backToWishlist(db, user.id, Number(readingBack[1]));
     if (r.error) return json({ error: r.error }, 400);
-    return json({ 
-      ok: true, 
-      wishBooks: core.listWishlist(user.id),
-      books: core.listReading(user.id)
-    });
+    return json({ ok: true, wishBooks: await core.listWishlist(db, user.id), books: await core.listReading(db, user.id) });
   }
   const readingMatch = path.match(/^\/api\/me\/reading\/(\d+)$/);
   if (readingMatch && method === "DELETE") {
-    core.removeFromReading(user.id, Number(readingMatch[1]));
-    return json({ 
-      books: core.listReading(user.id),
-      wishBooks: core.listWishlist(user.id)
-    });
+    await core.removeFromReading(db, user.id, Number(readingMatch[1]));
+    return json({ books: await core.listReading(db, user.id), wishBooks: await core.listWishlist(db, user.id) });
   }
 
   // ----- users -----
   if (path === "/api/users/search" && method === "GET") {
     const q = (url.searchParams.get("q") ?? "").trim();
     if (!q) return json({ users: [] });
-    return json({ users: core.searchUsers(q, user.id) });
+    return json({ users: await core.searchUsers(db, q, user.id) });
   }
   if (path === "/api/users/discover" && method === "GET") {
     const q = (url.searchParams.get("q") ?? "").trim();
     if (q) {
-      return json({ users: core.searchUsers(q, user.id) });
+      return json({ users: await core.searchUsers(db, q, user.id) });
     }
-    return json({ users: core.discoverUsers(user.id) });
+    return json({ users: await core.discoverUsers(db, user.id) });
   }
 
   // ----- friends -----
   if (path === "/api/friends" && method === "GET") {
-    return json({ friends: core.listFriends(user.id) });
+    return json({ friends: await core.listFriends(db, user.id) });
   }
   if (path === "/api/friends/requests" && method === "GET") {
-    return json(core.listFriendRequests(user.id));
+    return json(await core.listFriendRequests(db, user.id));
   }
   if (path === "/api/friends/requests" && method === "POST") {
     const { usernameOrEmail } = await readBody(req);
-    const r = core.sendFriendRequest(user.id, usernameOrEmail);
+    const r = await core.sendFriendRequest(db, user.id, usernameOrEmail);
     if (r.error) return json({ error: r.error }, 400);
     return json(r);
   }
@@ -570,33 +549,125 @@ export async function handleApi(req: Request): Promise<Response> {
   if (requestAction && method === "POST") {
     const id = Number(requestAction[1]);
     const r = requestAction[2] === "accept"
-      ? core.acceptFriendRequest(user.id, id)
-      : core.declineFriendRequest(user.id, id);
+      ? await core.acceptFriendRequest(db, user.id, id)
+      : await core.declineFriendRequest(db, user.id, id);
     if (r.error) return json({ error: r.error }, 404);
     return json(r);
   }
   const friendBooks = path.match(/^\/api\/friends\/([^/]+)\/books$/);
   if (friendBooks && method === "GET") {
-    const r = core.getFriendReads(user.id, decodeURIComponent(friendBooks[1]));
+    const r = await core.getFriendReads(db, user.id, decodeURIComponent(friendBooks[1]));
     if (r.error) return json({ error: r.error }, r.error === "User not found" ? 404 : 403);
     return json({ user: r.user, books: r.books });
   }
   const friendWish = path.match(/^\/api\/friends\/([^/]+)\/wishlist$/);
   if (friendWish && method === "GET") {
-    const r = core.getFriendWishlist(user.id, decodeURIComponent(friendWish[1]));
+    const r = await core.getFriendWishlist(db, user.id, decodeURIComponent(friendWish[1]));
     if (r.error) return json({ error: r.error }, r.error === "User not found" ? 404 : 403);
     return json({ user: r.user, books: r.books });
   }
   const friendReading = path.match(/^\/api\/friends\/([^/]+)\/reading$/);
   if (friendReading && method === "GET") {
-    const r = core.getFriendReading(user.id, decodeURIComponent(friendReading[1]));
+    const r = await core.getFriendReading(db, user.id, decodeURIComponent(friendReading[1]));
     if (r.error) return json({ error: r.error }, r.error === "User not found" ? 404 : 403);
     return json({ user: r.user, books: r.books });
   }
+  // ----- change password -----
+  if (path === "/api/change-password" && method === "POST") {
+    const { currentPassword, newPassword } = await readBody(req);
+    
+    if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
+      return json({ error: "Current and new password are required" }, 400);
+    }
+    
+    if (!validPassword(newPassword)) {
+      return json({ error: "New password must be at least 8 characters" }, 400);
+    }
+    
+    // Verify current password
+    const u = await core.findUser(db, user.email);
+    if (!u) return json({ error: "User not found" }, 404);
+    
+    const valid = await auth.verifyPassword(currentPassword, u.password_hash);
+    if (!valid) {
+      return json({ error: "Current password is incorrect" }, 401);
+    }
+    
+    // Hash and update to new password
+    const newHash = await auth.hashPassword(newPassword);
+    await execute(db, "UPDATE users SET password_hash = ? WHERE id = ?", newHash, user.id);
+    
+    return json({ ok: true });
+  }
+
   const unfriend = path.match(/^\/api\/friends\/(\d+)$/);
   if (unfriend && method === "DELETE") {
-    core.removeFriend(user.id, Number(unfriend[1]));
-    return json({ friends: core.listFriends(user.id) });
+    await core.removeFriend(db, user.id, Number(unfriend[1]));
+    return json({ friends: await core.listFriends(db, user.id) });
+  }
+
+  // ----- notifications -----
+  if (path === "/api/notifications" && method === "GET") {
+    const notifications = await core.getNotifications(db, user.id);
+    const unreadCount = await core.getUnreadNotificationCount(db, user.id);
+    return json({ notifications, unreadCount });
+  }
+
+  const dismissNotification = path.match(/^\/api\/notifications\/(\d+)\/dismiss$/);
+  if (dismissNotification && method === "POST") {
+    await core.dismissNotification(db, user.id, Number(dismissNotification[1]));
+    return json({ ok: true });
+  }
+
+  if (path === "/api/notifications/dismiss-all" && method === "POST") {
+    await core.dismissAllNotifications(db, user.id);
+    return json({ ok: true });
+  }
+
+  // ----- user approval (admin) -----
+  const approveUserMatch = path.match(/^\/api\/users\/(\d+)\/approve$/);
+  if (approveUserMatch && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const targetUserId = Number(approveUserMatch[1]);
+    await core.approveUser(db, targetUserId);
+    
+    // Dismiss the related notification
+    const notification = await queryOne<{ id: number }>(
+      db,
+      "SELECT id FROM notifications WHERE type = 'new_user_signup' AND data LIKE ? LIMIT 1",
+      `%"id":${targetUserId},%`
+    );
+    if (notification) {
+      await core.dismissNotification(db, user.id, notification.id);
+    }
+    
+    return json({ ok: true });
+  }
+
+  const rejectUserMatch = path.match(/^\/api\/users\/(\d+)\/reject$/);
+  if (rejectUserMatch && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const targetUserId = Number(rejectUserMatch[1]);
+    await core.rejectUser(db, targetUserId);
+    
+    // Dismiss the related notification
+    const notification = await queryOne<{ id: number }>(
+      db,
+      "SELECT id FROM notifications WHERE type = 'new_user_signup' AND data LIKE ? LIMIT 1",
+      `%"id":${targetUserId},%`
+    );
+    if (notification) {
+      await core.dismissNotification(db, user.id, notification.id);
+    }
+    
+    return json({ ok: true });
+  }
+
+  // Cleanup rejected users after grace period
+  if (path === "/api/admin/cleanup-rejected" && method === "POST") {
+    if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
+    const result = await core.cleanupRejectedUsers(db);
+    return json({ ok: true, deleted: result.deleted });
   }
 
   return json({ error: "Not found" }, 404);
