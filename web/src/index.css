@@ -549,6 +549,19 @@ button.danger:hover:not(:disabled) {
   font-size: 13px;
 }
 
+.review-modal-body {
+  padding: 20px 24px;
+}
+
+.review-modal-book {
+  margin-bottom: 4px;
+}
+
+.review-modal-body .review {
+  margin-top: 8px;
+  min-height: 140px;
+}
+
 .review-text {
   margin-top: 8px;
   font-size: 14px;
@@ -1006,17 +1019,8 @@ button.secondary:hover:not(:disabled) {
     border-radius: 8px;
     color: var(--muted);
   }
-  .review-toggle svg {
-    transition: transform 0.15s ease;
-  }
-  .review-toggle.open svg {
-    transform: rotate(180deg);
-  }
   .review-box {
     display: none;
-  }
-  .review-box.open {
-    display: block;
   }
   .friend-row-head {
     flex-wrap: wrap;

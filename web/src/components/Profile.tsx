@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Reorder, useDragControls } from "framer-motion";
 import { api, Book, User, WishlistItem, ReadingItem, NextUpItem } from "../api";
 
@@ -626,17 +627,13 @@ function ReadItem({
           {book.author || "Unknown author"}
           {book.first_publish_year ? ` · ${book.first_publish_year}` : ""}
         </div>
-        <button
-          type="button"
-          className={"review-toggle" + (reviewOpen ? " open" : "")}
-          onClick={() => setReviewOpen((o) => !o)}
-        >
-          {reviewOpen ? "Hide review" : review.trim() ? "Edit review" : "Add review"}
+        <button type="button" className="review-toggle" onClick={() => setReviewOpen(true)}>
+          Show review
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 15.5 4.5 8l1.4-1.4L12 12.7l6.1-6.1L19.5 8z" />
+            <path d="M4 4h7v2H6v5H4V4zm16 0v7h-2V6h-5V4h7zM4 20v-7h2v5h5v2H4zm16 0h-7v-2h5v-5h2v7z" />
           </svg>
         </button>
-        <div className={"review-box" + (reviewOpen ? " open" : "")}>
+        <div className="review-box">
           <textarea
             className="review"
             value={review}
@@ -649,6 +646,33 @@ function ReadItem({
             </button>
           )}
         </div>
+        {reviewOpen &&
+          createPortal(
+            <div className="modal-overlay" onClick={() => setReviewOpen(false)}>
+              <div className="modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Review</h2>
+                  <button type="button" className="modal-close" onClick={() => setReviewOpen(false)} aria-label="Close">
+                    ×
+                  </button>
+                </div>
+                <div className="review-modal-body">
+                  <div className="muted review-modal-book">{book.title}</div>
+                  <textarea
+                    className="review"
+                    value={review}
+                    placeholder="Write a review…"
+                    onChange={(e) => reviewOnChange(e.target.value)}
+                    autoFocus
+                  />
+                  <button className="save-review" onClick={onSaveReview} disabled={saving || !dirty}>
+                    {saving ? "Saving…" : "Save review"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
       </div>
       <div className="actions actions-col">
         <div className="public-col">
