@@ -1,6 +1,6 @@
 # BookRecs
 
-A tiny self-hosted book-tracking app. Create an account, fuzzy-search the
+A tiny book-tracking app. Create an account, fuzzy-search the
 [Open Library](https://openlibrary.org) to add books you've read (or add one
 by hand if it's missing), rank them in order (1 = your #1 — *not* a 1–5
 rating), write a short review, and add friends by username or email to browse
@@ -13,14 +13,13 @@ are each **public or private** (friends only see the public ones); your
 **currently reading** is always visible to friends. Click any book title to see
 its **detail page** with synopsis, friend activity, and review carousel.
 
-Everything runs on one small Linux box: **Bun** + **SQLite** + **Vite/React**,
-exposed to the internet with a **cloudflared** quick tunnel.
+Runs on **Cloudflare Workers** + **D1** + **Pages**.
 
 ## Stack
 
-- **Runtime:** [Bun](https://bun.sh) (HTTP server + `bun:sqlite` + password hashing)
-- **Data:** SQLite (single file, WAL mode — no external DB)
-- **Frontend:** React + Vite, built to static files served by the same Bun process
+- **Runtime:** [Cloudflare Workers](https://workers.cloudflare.com) (serverless edge runtime)
+- **Data:** [Cloudflare D1](https://www.cloudflare.com/developer-platform/d1/) (serverless SQLite)
+- **Frontend:** React + Vite, deployed to Cloudflare Pages
 - **Auth:** username/email + password (argon2), self-signup, HttpOnly session cookie
 - **Books:** [Open Library](https://openlibrary.org) search + work metadata
 - **AI agents:** a stdio **MCP server** exposing the same operations as tools
@@ -30,22 +29,21 @@ exposed to the internet with a **cloudflared** quick tunnel.
 ```
 bookrecs/
 ├─ src/
-│  ├─ server.ts    # Bun.serve entry: API + static frontend
-│  ├─ api.ts       # HTTP routes
-│  ├─ static.ts    # serves web/dist with SPA fallback
-│  ├─ mcp.ts       # MCP (stdio JSON-RPC) server for AI agents
-│  ├─ db.ts        # SQLite schema + connection
-│  ├─ auth.ts      # password hashing + sessions
+│  ├─ api.ts       # HTTP routes (Workers/D1 compatible)
 │  ├─ core.ts      # domain logic (books, ranked reads, friends)
+│  ├─ db.ts        # D1 database helpers
+│  ├─ auth.ts      # password hashing + sessions (Web Crypto)
+│  ├─ ratelimit.ts # D1-backed rate limiting
+│  ├─ twofa.ts     # 2FA TOTP (Web Crypto)
+│  ├─ mcp.ts       # MCP (stdio JSON-RPC) server for AI agents
 │  ├─ ol.ts        # Open Library client
-│  ├─ ratelimit.ts # login rate limiting
-│  ├─ twofa.ts     # 2FA TOTP implementation
 │  └─ encryption.ts# session token encryption
+├─ functions/      # Cloudflare Pages Functions (API entry point)
 ├─ web/            # Vite + React frontend
 ├─ scripts/
 │  ├─ mcp.sh       # cwd-independent MCP launcher
 │  └─ backfill-synopses.ts # fetch synopses for existing books
-└─ data/           # SQLite database lives here (gitignored)
+└─ migrations/     # D1 database migrations
 ```
 
 ## Quick start (development)
@@ -55,51 +53,29 @@ bookrecs/
 bun install
 (cd web && bun install)
 
-# terminal 1 — API server (port 3000)
+# run locally with Wrangler (port 8788)
 bun run dev
 
-# terminal 2 — Vite dev server (port 5173), proxies /api
+# or just the frontend dev server (port 5173)
 bun run dev:web
 ```
 
-Open http://localhost:5173, sign up, and add a book.
+Open http://localhost:8788, sign up, and add a book.
 
-## Production (single process)
+## Production
+
+The app deploys automatically via GitHub Actions when you push to `main`:
+1. Database migrations run against D1
+2. Frontend builds and deploys to Cloudflare Pages
+3. API runs as a Cloudflare Worker
+
+To deploy manually:
 
 ```bash
 bun install          # if not done
 (cd web && bun install)
 bun run build        # builds web/dist
-bun run start        # serves API + frontend on PORT (default 3000)
-```
-
-The server serves the built frontend itself (`web/dist`), so only one process is
-needed in production.
-
-Environment variables (see `.env.example`):
-
-| Var            | Default               | Purpose                                   |
-|----------------|-----------------------|-------------------------------------------|
-| `PORT`         | `3000`                | HTTP listen port                          |
-| `BOOKRECS_DB`  | `data/bookrecs.sqlite`| SQLite file path (absolute or relative)   |
-| `BOOKRECS_USER`| —                     | User the MCP server acts on behalf of      |
-
-## Expose it with cloudflared (quick tunnel)
-
-```bash
-cloudflared tunnel --url http://localhost:3000
-```
-
-You'll get a free `https://<random>.trycloudflare.com` URL. Share that with your
-friends. *(The URL changes each time the tunnel restarts. For a permanent URL,
-create a named tunnel against your Cloudflare domain.)*
-
-To keep both running in the background:
-
-```bash
-# in two terminals, or via systemd/pm2/tmux
-bun run start
-cloudflared tunnel --url http://localhost:3000
+bun run deploy       # deploys worker + pages
 ```
 
 ## Talking to it from AI agents (MCP)
@@ -225,8 +201,7 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 
 ## Notes
 
-- Database is a single SQLite file under `data/`. Back it up by copying that
-  file (stop the server first, or use `.backup` for a live copy).
+- Database is Cloudflare D1 (serverless SQLite). Back it up using `wrangler d1 export` or the Cloudflare dashboard.
 - Rankings are an **ordered list** (1 = top), maintained by shifting ranks.
 - Every read/wishlist book is individually **public or private**; friends only
   see your public books. Existing books were seeded public; newly added books
@@ -236,7 +211,7 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   `#/u/<username>` — so reloading keeps you on the same page.
 - Friend requests are mutual: a pending request from the other side is
   auto-accepted when you send yours.
-- Starting a book is one tap: every book on a friend's profile has a “📖 Reading”
-  quick action (plus “♡ Wishlist”), and your own wishlist items have a
-  “📖 Reading” button to start reading them.
-- Reset the database with `bun run reset-db` (deletes `data/bookrecs.sqlite`).
+- Starting a book is one tap: every book on a friend's profile has a "📖 Reading"
+  quick action (plus "♡ Wishlist"), and your own wishlist items have a
+  "📖 Reading" button to start reading them.
+- Database migrations are in `migrations/` and run automatically on deploy.
