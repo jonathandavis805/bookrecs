@@ -41,38 +41,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          # Create tracking table if it doesn't exist
-          wrangler d1 execute bookrecs-db --remote --yes --command="
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-              filename TEXT PRIMARY KEY,
-              applied_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )
-          "
-          
-          for migration in $(ls migrations/*.sql | sort); do
-            filename=$(basename "$migration")
-            # Check if already applied
-            result=$(wrangler d1 execute bookrecs-db --remote --yes --json --command="SELECT filename FROM schema_migrations WHERE filename = '$filename'")
-            
-            if echo "$result" | grep -q "\"filename\":\"$filename\""; then
-              echo "✓ Skipping $filename (already applied)"
-            else
-              echo "→ Applying $migration"
-              # Try to apply migration, handle duplicate column errors gracefully
-              if wrangler d1 execute bookrecs-db --file="$migration" --remote --yes 2>&1 | tee /tmp/migration_output.txt; then
-                wrangler d1 execute bookrecs-db --remote --yes --command="INSERT INTO schema_migrations (filename) VALUES ('$filename')"
-                echo "✓ $filename applied"
-              elif grep -qi "duplicate column" /tmp/migration_output.txt; then
-                echo "⚠ Migration $filename partially applied (duplicate column detected), marking as applied"
-                wrangler d1 execute bookrecs-db --remote --yes --command="INSERT OR IGNORE INTO schema_migrations (filename) VALUES ('$filename')"
-              else
-                echo "✗ Migration $filename failed"
-                cat /tmp/migration_output.txt
-                exit 1
-              fi
-            fi
-          done
+        run: node scripts/run-migrations.js
 
       - name: Deploy to Cloudflare Pages
         if: github.event_name == 'push'
