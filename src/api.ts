@@ -2,7 +2,7 @@ import * as auth from "./auth";
 import * as core from "./core";
 import * as ratelimit from "./ratelimit";
 import * as twofa from "./twofa";
-import { searchBooks } from "./ol";
+import { searchBooks, isLatin } from "./ol";
 import { execute, queryOne, now } from "./db";
 
 const SESSION_COOKIE = "session";
@@ -290,13 +290,14 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
       const results = await searchBooks(q);
       const keys = results.map(r => r.key);
       const existingKeys = await core.getExistingBookKeys(db, keys);
-      const sorted = results.sort((a, b) => {
-        const aExists = existingKeys.has(a.key);
-        const bExists = existingKeys.has(b.key);
-        if (aExists && !bExists) return -1;
-        if (!aExists && bExists) return 1;
-        return 0;
-      });
+      // Books already in the system surface near the top (with the "added"
+      // flag), but that boost must never override language preference: for a
+      // Latin-script query, a foreign-script title ranks below every
+      // Latin-script one even if it's already in the system. Buckets:
+      // 0 = Latin + added, 1 = Latin + new, 2 = foreign + added, 3 = foreign + new.
+      const rank = (r: { key: string; title: string }) =>
+        (isLatin(q) && !isLatin(r.title) ? 2 : 0) + (existingKeys.has(r.key) ? 0 : 1);
+      const sorted = results.sort((a, b) => rank(a) - rank(b));
       const resultsWithFlag = sorted.map(r => ({ ...r, added: existingKeys.has(r.key) }));
       return json({ results: resultsWithFlag });
     } catch (e) {

@@ -38,7 +38,7 @@ function yearFrom(dateStr?: string): number | undefined {
 // Non-Latin scripts (Cyrillic, Greek, CJK, Arabic, Indic, Hangul, ...).
 const NON_LATIN = /[\u0370-\u03FF\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]/;
 
-function isLatin(s: string): boolean {
+export function isLatin(s: string): boolean {
   return !NON_LATIN.test(s);
 }
 
