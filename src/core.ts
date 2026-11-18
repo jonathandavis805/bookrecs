@@ -1520,6 +1520,17 @@ export async function respondToClubInvite(
   } else {
     await execute(db, "DELETE FROM club_members WHERE club_id = ? AND user_id = ?", clubId, userId);
   }
+
+  // The invite is handled — whether the user accepts it here or in the
+  // notifications panel, its club_invite notification is dealt with. The
+  // data payload starts with {"clubId":N, so the comma keeps club 1 from
+  // matching club 11, etc.
+  await execute(
+    db,
+    "UPDATE notifications SET read = 1 WHERE user_id = ? AND type = 'club_invite' AND data LIKE ?",
+    userId,
+    `%"clubId":${clubId},%`
+  );
   return { ok: true };
 }
 

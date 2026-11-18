@@ -90,8 +90,8 @@ function Main({
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  // Bumped whenever friend requests change so the Friends page,
-  // notifications panel, and unread badge all stay in sync
+  // Bumped whenever friend requests or club invites change so the Friends
+  // page, Clubs page, notifications panel, and unread badge all stay in sync
   const [friendRequestsVersion, setFriendRequestsVersion] = useState(0);
   const bumpFriendRequests = () => setFriendRequestsVersion((v) => v + 1);
 
@@ -172,7 +172,14 @@ function Main({
             onChangePassword={() => setShowSettings(true)} 
           />
         )}
-        {active === "clubs" && <Clubs key={user.username} user={user} />}
+        {active === "clubs" && (
+          <Clubs
+            key={user.username}
+            user={user}
+            refreshKey={friendRequestsVersion}
+            onClubsChanged={bumpFriendRequests}
+          />
+        )}
         {route.name === "club" && (
           <ClubDetail
             key={route.clubId}

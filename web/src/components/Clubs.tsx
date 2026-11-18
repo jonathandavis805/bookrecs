@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
 import { api, ClubSummary, ClubInvite, User } from "../api";
 
-export default function Clubs({ user }: { user: User }) {
+export default function Clubs({
+  user,
+  refreshKey,
+  onClubsChanged,
+}: {
+  user: User;
+  refreshKey: number;
+  onClubsChanged: () => void;
+}) {
   const [clubs, setClubs] = useState<ClubSummary[]>([]);
   const [invites, setInvites] = useState<ClubInvite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,7 +30,7 @@ export default function Clubs({ user }: { user: User }) {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [refreshKey]);
 
   async function respond(clubId: number, accept: boolean) {
     setError("");
@@ -33,6 +41,10 @@ export default function Clubs({ user }: { user: User }) {
       });
       setClubs(d.clubs);
       setInvites(d.invites);
+      // The backend marked the invite notification as read — refresh the
+      // bell count (and any other panels) right away instead of waiting
+      // for the 30s poll.
+      onClubsChanged();
     } catch (e: any) {
       setError(e.message);
     }
