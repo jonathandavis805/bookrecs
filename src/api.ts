@@ -672,8 +672,17 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   const clubCloseVote = path.match(/^\/api\/clubs\/(\d+)\/close-vote$/);
   if (clubCloseVote && method === "POST") {
     const r = await core.closeVote(db, user.id, Number(clubCloseVote[1]));
-    if (r.error) return json({ error: r.error }, 400);
+    if (r.error) {
+      return json({ error: r.error, ...(r.tie ? { tie: true, tiedTitles: r.tiedTitles ?? [] } : {}) }, 400);
+    }
     return json(r);
+  }
+  const clubRunoff = path.match(/^\/api\/clubs\/(\d+)\/runoff$/);
+  if (clubRunoff && method === "POST") {
+    const r = await core.startRunoff(db, user.id, Number(clubRunoff[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    const detail = await core.getClub(db, user.id, Number(clubRunoff[1]));
+    return json(detail.error ? { ok: true } : { club: detail.club });
   }
   const clubReopenVote = path.match(/^\/api\/clubs\/(\d+)\/reopen-vote$/);
   if (clubReopenVote && method === "POST") {

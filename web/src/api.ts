@@ -136,6 +136,7 @@ export interface ClubDetailData {
   };
   myRole: "owner" | "member";
   votingOpen: boolean;
+  runoff: boolean;
   members: ClubMember[];
   nominations: ClubNomination[];
   myVote: number | null;

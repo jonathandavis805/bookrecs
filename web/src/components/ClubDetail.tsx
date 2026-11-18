@@ -41,6 +41,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const [vetoBusy, setVetoBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<ClubNomination | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
+  const [showRunoff, setShowRunoff] = useState(false);
+  const [runoffBusy, setRunoffBusy] = useState(false);
 
   async function load(background = false) {
     try {
@@ -136,8 +138,12 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
     (m) => m.status === "accepted" && m.role !== "owner"
   );
   const activeNominations = data.nominations.filter((n) => n.vetoed_by == null);
-  // Live order: most votes first (ties go to the earliest nomination, same
-  // as the winner rule), vetoed nominations sink to the bottom.
+  // A tie at the top (books sharing the lead with at least one vote).
+  const topVotes = activeNominations.reduce((m, n) => Math.max(m, n.votes), 0);
+  const tiedNominations = topVotes > 0 ? activeNominations.filter((n) => n.votes === topVotes) : [];
+  // Live order: most votes first (tied books hold their nomination order —
+  // they only move when a count actually changes), vetoed nominations sink
+  // to the bottom.
   const sortedNominations = [...activeNominations]
     .sort((a, b) => (b.votes - a.votes) || (a.created_at - b.created_at) || (a.id - b.id))
     .concat(data.nominations.filter((n) => n.vetoed_by != null));
@@ -199,7 +205,26 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   }
 
   async function closeVote() {
+    // A tie at the top needs a runoff — offer it instead of failing.
+    if (tiedNominations.length > 1) {
+      setShowRunoff(true);
+      return;
+    }
     await act(() => api(`/api/clubs/${clubId}/close-vote`, { method: "POST" }), "Vote closed — winner picked.");
+  }
+
+  async function startRunoff() {
+    setRunoffBusy(true);
+    try {
+      await api(`/api/clubs/${clubId}/runoff`, { method: "POST" });
+      setShowRunoff(false);
+      setInfo("Runoff started — votes reset for the tied books.");
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setRunoffBusy(false);
+    }
   }
 
   async function reopenVote() {
@@ -307,17 +332,35 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                       ? data.nominations.length > 0
                         ? "Every nomination was vetoed"
                         : "Nominate at least one book first"
+                      : tiedNominations.length > 1
+                      ? "It's tied — a runoff will resolve it"
                       : activeNominations.every((n) => n.votes === 0)
                       ? "Waiting for votes"
                       : "Most votes wins"
                   }
                 >
-                  Close voting &amp; pick winner
+                  {data.runoff ? "Close runoff &amp; pick winner" : "Close voting &amp; pick winner"}
                 </button>
               </div>
             )}
 
-            <NominatePane clubId={clubId} onNominated={load} />
+            {data.runoff && (
+              <div className="club-runoff-banner">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 5h-2v6l5 3 1-1.7-4-2.3V7z" />
+                </svg>
+                <span>
+                  <strong>Runoff</strong> — {activeNominations.map((n) => `"${n.title}"`).join(" vs ")}.
+                  Votes were reset; cast yours again to break the tie.
+                </span>
+              </div>
+            )}
+
+            {!data.runoff ? (
+              <NominatePane clubId={clubId} onNominated={load} />
+            ) : (
+              <div className="muted club-myvote-note">Nominations are paused until the runoff ends.</div>
+            )}
 
             {data.nominations.length === 0 ? (
               <div className="empty">No nominations yet — suggest the first book.</div>
@@ -485,6 +528,34 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                   }}
                 >
                   Delete this club instead
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRunoff && (
+        <div className="modal-overlay" onClick={() => setShowRunoff(false)}>
+          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>It's a tie</h2>
+              <button className="modal-close" onClick={() => setShowRunoff(false)}>
+                ×
+              </button>
+            </div>
+            <div className="club-modal-body">
+              <p className="muted">
+                {tiedNominations.map((n) => `"${n.title}"`).join(" and ")} are tied at {topVotes}{" "}
+                {topVotes === 1 ? "vote" : "votes"} each. Start a runoff? The other nominations are
+                dropped, votes reset, and everyone votes again between just these books.
+              </p>
+              <div className="form-actions">
+                <button className="btn-primary" disabled={runoffBusy} onClick={startRunoff}>
+                  {runoffBusy ? "Starting…" : "Start runoff"}
+                </button>
+                <button className="btn-secondary" onClick={() => setShowRunoff(false)}>
+                  Cancel
                 </button>
               </div>
             </div>
