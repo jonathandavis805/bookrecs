@@ -103,9 +103,24 @@ function applyMigration(filePath, filename) {
   
   const content = fs.readFileSync(filePath, 'utf-8');
   const statements = content
+    // Strip comment lines BEFORE splitting on ';'. A leading comment block
+    // runs into the first statement with no ';' between them, so splitting
+    // first made the comment+statement chunk look like one big comment and
+    // silently swallowed that statement (e.g. the very first CREATE TABLE
+    // of a migration).
+    .split('\n')
+    .filter(line => !line.trim().startsWith('--'))
+    .join('\n')
     .split(';')
     .map(s => s.trim())
-    .filter(s => s && !s.startsWith('--'));
+    .filter(Boolean);
+  
+  // A migration that parses to zero statements is a parsing bug, not a
+  // no-op — never mark it applied.
+  if (statements.length === 0) {
+    console.error(`  ✗ ${filename} contains no executable statements — refusing to mark as applied`);
+    return false;
+  }
   
   const statementsToExecute = [];
   
