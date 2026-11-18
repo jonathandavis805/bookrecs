@@ -1672,6 +1672,41 @@ export async function vetoNomination(
   return { ok: true };
 }
 
+export async function removeNomination(
+  db: D1Database,
+  userId: number,
+  clubId: number,
+  nominationId: number
+): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
+  if (membership.role !== "owner") return { ok: false, error: "Only the club owner can remove nominations" };
+
+  const nomination = await queryOne<{ title: string }>(
+    db,
+    `SELECT b.title FROM club_nominations n JOIN books b ON b.id = n.book_id
+     WHERE n.id = ? AND n.club_id = ?`,
+    nominationId, clubId
+  );
+  if (!nomination) return { ok: false, error: "Nomination not found" };
+
+  // A removal takes the book out entirely — votes on it are released, and
+  // because the row is gone it can be nominated again like new. Unlike a
+  // veto it isn't recorded anywhere (that's the point: it never belonged).
+  await execute(db, "DELETE FROM club_votes WHERE nomination_id = ?", nominationId);
+  await execute(db, "DELETE FROM club_nominations WHERE id = ?", nominationId);
+
+  const owner = await getUserById(db, userId);
+  await notifyAcceptedMembers(
+    db, clubId, userId, "club_nomination_removed",
+    `@${owner?.username ?? "Someone"} removed "${nomination.title}" from the vote in "${club.name}"`,
+    { clubId, name: club.name, bookTitle: nomination.title }
+  );
+  return { ok: true };
+}
+
 export async function closeVote(
   db: D1Database,
   userId: number,

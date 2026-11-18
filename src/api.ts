@@ -688,6 +688,13 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const detail = await core.getClub(db, user.id, Number(clubRemoveMember[1]));
     return json(detail.error ? { ok: true } : { club: detail.club });
   }
+  const clubRemoveNomination = path.match(/^\/api\/clubs\/(\d+)\/nominations\/(\d+)$/);
+  if (clubRemoveNomination && method === "DELETE") {
+    const r = await core.removeNomination(db, user.id, Number(clubRemoveNomination[1]), Number(clubRemoveNomination[2]));
+    if (r.error) return json({ error: r.error }, 400);
+    const detail = await core.getClub(db, user.id, Number(clubRemoveNomination[1]));
+    return json(detail.error ? { ok: true } : { club: detail.club });
+  }
   const clubLeave = path.match(/^\/api\/clubs\/(\d+)\/leave$/);
   if (clubLeave && method === "POST") {
     const r = await core.leaveClub(db, user.id, Number(clubLeave[1]));

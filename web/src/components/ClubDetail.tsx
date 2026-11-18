@@ -39,6 +39,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const [leaveBusy, setLeaveBusy] = useState(false);
   const [vetoTarget, setVetoTarget] = useState<ClubNomination | null>(null);
   const [vetoBusy, setVetoBusy] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<ClubNomination | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   async function load(background = false) {
     try {
@@ -182,6 +184,20 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
     }
   }
 
+  async function removeNomination() {
+    if (!removeTarget) return;
+    setRemoveBusy(true);
+    try {
+      await api(`/api/clubs/${clubId}/nominations/${removeTarget.id}`, { method: "DELETE" });
+      setRemoveTarget(null);
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setRemoveBusy(false);
+    }
+  }
+
   async function closeVote() {
     await act(() => api(`/api/clubs/${clubId}/close-vote`, { method: "POST" }), "Vote closed — winner picked.");
   }
@@ -313,9 +329,11 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                     n={n}
                     myVote={data.myVote === n.id}
                     canVeto={!data.myVetoUsed && n.vetoed_by == null}
+                    isOwner={isOwner}
                     onVote={() => vote(n.id)}
                     onUnvote={unvote}
                     onVeto={() => setVetoTarget(n)}
+                    onRemove={() => setRemoveTarget(n)}
                   />
                 ))}
               </motion.ul>
@@ -501,6 +519,34 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         </div>
       )}
 
+      {removeTarget && (
+        <div className="modal-overlay" onClick={() => setRemoveTarget(null)}>
+          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Remove this book</h2>
+              <button className="modal-close" onClick={() => setRemoveTarget(null)}>
+                ×
+              </button>
+            </div>
+            <div className="club-modal-body">
+              <p className="muted">
+                Remove "{removeTarget.title}" from the vote? It leaves the list entirely — any votes for it are
+                released, and it can be nominated again like new. For accidents; use your veto to block a book
+                you oppose.
+              </p>
+              <div className="form-actions">
+                <button className="btn-delete" disabled={removeBusy} onClick={removeNomination}>
+                  {removeBusy ? "Removing…" : "Remove book"}
+                </button>
+                <button className="btn-secondary" onClick={() => setRemoveTarget(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showDelete && (
         <div className="modal-overlay" onClick={() => setShowDelete(false)}>
           <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
@@ -625,16 +671,20 @@ function NominationRow({
   n,
   myVote,
   canVeto,
+  isOwner,
   onVote,
   onUnvote,
   onVeto,
+  onRemove,
 }: {
   n: ClubNomination;
   myVote: boolean;
   canVeto: boolean;
+  isOwner: boolean;
   onVote: () => void;
   onUnvote: () => void;
   onVeto: () => void;
+  onRemove: () => void;
 }) {
   const vetoed = n.vetoed_by != null;
   return (
@@ -660,27 +710,40 @@ function NominationRow({
           {` · nominated by @${n.nominatedBy}`}
         </div>
       </div>
-      {!vetoed && (
-        <div className="actions">
-          <span className="club-vote-count" title={`${n.votes} vote${n.votes === 1 ? "" : "s"}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M2 21h4V9H2v12zM22 10c0-1.1-.9-2-2-2h-6.3l1-4.6v-.3c0-.4-.2-.8-.4-1.1L13 1 7.6 6.4C7.2 6.8 7 7.3 7 7.8V19c0 1.1.9 2 2 2h8.4c.8 0 1.6-.5 1.9-1.3l2.6-6.1c.1-.2.1-.4.1-.6V10z" />
-            </svg>
-            {n.votes}
-          </span>
-          <button
-            className={myVote ? "secondary" : ""}
-            onClick={myVote ? onUnvote : onVote}
-          >
-            {myVote ? "Unvote" : "Vote"}
-          </button>
-          {canVeto && (
-            <button className="secondary club-veto-btn" onClick={onVeto} title="Strike this book (one veto per vote)">
-              Veto
+      <div className="actions">
+        {!vetoed && (
+          <>
+            <span className="club-vote-count" title={`${n.votes} vote${n.votes === 1 ? "" : "s"}`}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M2 21h4V9H2v12zM22 10c0-1.1-.9-2-2-2h-6.3l1-4.6v-.3c0-.4-.2-.8-.4-1.1L13 1 7.6 6.4C7.2 6.8 7 7.3 7 7.8V19c0 1.1.9 2 2 2h8.4c.8 0 1.6-.5 1.9-1.3l2.6-6.1c.1-.2.1-.4.1-.6V10z" />
+              </svg>
+              {n.votes}
+            </span>
+            <button
+              className={myVote ? "secondary" : ""}
+              onClick={myVote ? onUnvote : onVote}
+            >
+              {myVote ? "Unvote" : "Vote"}
             </button>
-          )}
-        </div>
-      )}
+            {canVeto && (
+              <button className="secondary club-veto-btn" onClick={onVeto} title="Strike this book (one veto per vote)">
+                Veto
+              </button>
+            )}
+          </>
+        )}
+        {isOwner && (
+          <button
+            className="club-nomination-remove"
+            onClick={onRemove}
+            title={vetoed ? "Remove this entry entirely" : "Remove from vote (accidental nomination)"}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        )}
+      </div>
     </motion.li>
   );
 }

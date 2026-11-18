@@ -1772,3 +1772,16 @@ button.secondary:hover:not(:disabled) {
 .club-veto-btn {
   color: var(--danger);
 }
+
+/* ---------- Owner remove-nomination ---------- */
+.club-nomination-remove {
+  color: var(--muted);
+  padding: 6px;
+  border-radius: 6px;
+}
+
+.club-nomination-remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: rgba(179, 64, 64, 0.08);
+  text-decoration: none;
+}
