@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { api, User, ClubDetailData, ClubNomination, SearchHit } from "../api";
 
 function goBackToClubs() {
@@ -36,6 +37,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [showMemberLeave, setShowMemberLeave] = useState(false);
   const [leaveBusy, setLeaveBusy] = useState(false);
+  const [vetoTarget, setVetoTarget] = useState<ClubNomination | null>(null);
+  const [vetoBusy, setVetoBusy] = useState(false);
 
   async function load(background = false) {
     try {
@@ -130,6 +133,12 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const transferCandidates = data.members.filter(
     (m) => m.status === "accepted" && m.role !== "owner"
   );
+  const activeNominations = data.nominations.filter((n) => n.vetoed_by == null);
+  // Live order: most votes first (ties go to the earliest nomination, same
+  // as the winner rule), vetoed nominations sink to the bottom.
+  const sortedNominations = [...activeNominations]
+    .sort((a, b) => (b.votes - a.votes) || (a.created_at - b.created_at) || (a.id - b.id))
+    .concat(data.nominations.filter((n) => n.vetoed_by != null));
 
   async function act(fn: () => Promise<any>, message?: string) {
     setError("");
@@ -154,6 +163,23 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
 
   async function unvote() {
     await act(() => api(`/api/clubs/${clubId}/vote`, { method: "DELETE" }));
+  }
+
+  async function veto() {
+    if (!vetoTarget) return;
+    setVetoBusy(true);
+    try {
+      await api(`/api/clubs/${clubId}/veto`, {
+        method: "POST",
+        body: JSON.stringify({ nominationId: vetoTarget.id }),
+      });
+      setVetoTarget(null);
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setVetoBusy(false);
+    }
   }
 
   async function closeVote() {
@@ -259,11 +285,13 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                 <button
                   className="btn-primary"
                   onClick={closeVote}
-                  disabled={data.nominations.length === 0 || data.nominations.every((n) => n.votes === 0)}
+                  disabled={activeNominations.length === 0 || activeNominations.every((n) => n.votes === 0)}
                   title={
-                    data.nominations.length === 0
-                      ? "Nominate at least one book first"
-                      : data.nominations.every((n) => n.votes === 0)
+                    activeNominations.length === 0
+                      ? data.nominations.length > 0
+                        ? "Every nomination was vetoed"
+                        : "Nominate at least one book first"
+                      : activeNominations.every((n) => n.votes === 0)
                       ? "Waiting for votes"
                       : "Most votes wins"
                   }
@@ -278,17 +306,19 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
             {data.nominations.length === 0 ? (
               <div className="empty">No nominations yet — suggest the first book.</div>
             ) : (
-              <ul className="plain-list">
-                {data.nominations.map((n) => (
+              <motion.ul className="plain-list" layout>
+                {sortedNominations.map((n) => (
                   <NominationRow
                     key={n.id}
                     n={n}
                     myVote={data.myVote === n.id}
+                    canVeto={!data.myVetoUsed && n.vetoed_by == null}
                     onVote={() => vote(n.id)}
                     onUnvote={unvote}
+                    onVeto={() => setVetoTarget(n)}
                   />
                 ))}
-              </ul>
+              </motion.ul>
             )}
 
             {data.myVote != null && (
@@ -299,6 +329,11 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                 </button>
               </div>
             )}
+            <div className="muted club-myvote-note">
+              {data.myVetoUsed
+                ? "You've used your veto for this vote."
+                : "You also get one veto — it strikes a book for everyone and can't be undone."}
+            </div>
           </>
         )}
       </section>
@@ -439,6 +474,33 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         </div>
       )}
 
+      {vetoTarget && (
+        <div className="modal-overlay" onClick={() => setVetoTarget(null)}>
+          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Veto this book</h2>
+              <button className="modal-close" onClick={() => setVetoTarget(null)}>
+                ×
+              </button>
+            </div>
+            <div className="club-modal-body">
+              <p className="muted">
+                Veto "{vetoTarget.title}"? It's struck from this vote and any votes for it are released.
+                You only get one veto per vote, and this can't be undone.
+              </p>
+              <div className="form-actions">
+                <button className="btn-delete" disabled={vetoBusy} onClick={veto}>
+                  {vetoBusy ? "Vetoing…" : "Veto book"}
+                </button>
+                <button className="btn-secondary" onClick={() => setVetoTarget(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showDelete && (
         <div className="modal-overlay" onClick={() => setShowDelete(false)}>
           <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
@@ -562,16 +624,25 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
 function NominationRow({
   n,
   myVote,
+  canVeto,
   onVote,
   onUnvote,
+  onVeto,
 }: {
   n: ClubNomination;
   myVote: boolean;
+  canVeto: boolean;
   onVote: () => void;
   onUnvote: () => void;
+  onVeto: () => void;
 }) {
+  const vetoed = n.vetoed_by != null;
   return (
-    <li className={"book-row club-nomination-row" + (myVote ? " my-vote" : "")}>
+    <motion.li
+      layout
+      transition={{ type: "spring", stiffness: 500, damping: 40 }}
+      className={"book-row club-nomination-row" + (myVote ? " my-vote" : "") + (vetoed ? " vetoed" : "")}
+    >
       {n.cover_url ? (
         <img className="cover" src={n.cover_url} alt="" />
       ) : (
@@ -581,6 +652,7 @@ function NominationRow({
         <div className="title">
           {n.title}
           {myVote && <span className="badge vote-badge">Your vote</span>}
+          {vetoed && <span className="badge veto-badge">Vetoed by @{n.vetoedBy ?? "a member"}</span>}
         </div>
         <div className="author">
           {n.author || "Unknown author"}
@@ -588,21 +660,28 @@ function NominationRow({
           {` · nominated by @${n.nominatedBy}`}
         </div>
       </div>
-      <div className="actions">
-        <span className="club-vote-count" title={`${n.votes} vote${n.votes === 1 ? "" : "s"}`}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M2 21h4V9H2v12zM22 10c0-1.1-.9-2-2-2h-6.3l1-4.6v-.3c0-.4-.2-.8-.4-1.1L13 1 7.6 6.4C7.2 6.8 7 7.3 7 7.8V19c0 1.1.9 2 2 2h8.4c.8 0 1.6-.5 1.9-1.3l2.6-6.1c.1-.2.1-.4.1-.6V10z" />
-          </svg>
-          {n.votes}
-        </span>
-        <button
-          className={myVote ? "secondary" : ""}
-          onClick={myVote ? onUnvote : onVote}
-        >
-          {myVote ? "Unvote" : "Vote"}
-        </button>
-      </div>
-    </li>
+      {!vetoed && (
+        <div className="actions">
+          <span className="club-vote-count" title={`${n.votes} vote${n.votes === 1 ? "" : "s"}`}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M2 21h4V9H2v12zM22 10c0-1.1-.9-2-2-2h-6.3l1-4.6v-.3c0-.4-.2-.8-.4-1.1L13 1 7.6 6.4C7.2 6.8 7 7.3 7 7.8V19c0 1.1.9 2 2 2h8.4c.8 0 1.6-.5 1.9-1.3l2.6-6.1c.1-.2.1-.4.1-.6V10z" />
+            </svg>
+            {n.votes}
+          </span>
+          <button
+            className={myVote ? "secondary" : ""}
+            onClick={myVote ? onUnvote : onVote}
+          >
+            {myVote ? "Unvote" : "Vote"}
+          </button>
+          {canVeto && (
+            <button className="secondary club-veto-btn" onClick={onVeto} title="Strike this book (one veto per vote)">
+              Veto
+            </button>
+          )}
+        </div>
+      )}
+    </motion.li>
   );
 }
 

@@ -120,6 +120,8 @@ export interface ClubNomination {
   user_id: number;
   nominatedBy: string;
   votes: number;
+  vetoed_by: number | null;
+  vetoedBy: string | null;
   created_at: number;
 }
 
@@ -137,6 +139,7 @@ export interface ClubDetailData {
   members: ClubMember[];
   nominations: ClubNomination[];
   myVote: number | null;
+  myVetoUsed: boolean;
   currentPick: ClubPick | null;
   pastPicks: ClubPick[];
 }

@@ -211,6 +211,7 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 | POST | `/api/clubs/:id/respond` | `{accept}` accept/decline your invite |
 | POST | `/api/clubs/:id/nominate` | `{ol_key?, book_id?, year?}` nominate a book (while voting is open) |
 | POST | `/api/clubs/:id/vote` | `{nominationId}` cast/move your one vote |
+| POST | `/api/clubs/:id/veto` | `{nominationId}` strike a nomination (one veto per member per vote) |
 | DELETE | `/api/clubs/:id/vote` | remove your vote |
 | POST | `/api/clubs/:id/close-vote` | owner: most votes wins, becomes the current read |
 | POST | `/api/clubs/:id/reopen-vote` | owner: start a new nomination/vote cycle |
@@ -244,9 +245,12 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   current read with a one-tap "Start reading" into your personal list. The
   owner can then start a fresh vote; past picks are kept on the club page.
   Open club pages live-update over Server-Sent Events (`/api/clubs/:id/events`
-  pushes the detail the moment a version check notices a change) with an
-  automatic 5s-polling fallback when the stream can't connect. Owners who
-  want out must transfer ownership to a member or delete the club.
+  pushes the detail within ~half a second of a change) with an automatic
+  5s-polling fallback when the stream can't connect. Nominations are ordered
+  by live vote count with animated reordering, and each member gets one veto
+  per vote: a vetoed nomination is struck (votes on it are released, it
+  can't win). Owners who want out must transfer ownership to a member or
+  delete the club.
 - Starting a book is one tap: every book on a friend's profile has a "📖 Reading"
   quick action (plus "♡ Wishlist"), and your own wishlist items have a
   "📖 Reading" button to start reading them.

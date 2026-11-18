@@ -660,6 +660,15 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const detail = await core.getClub(db, user.id, Number(clubVote[1]));
     return json(detail.error ? { ok: true } : { club: detail.club });
   }
+  const clubVeto = path.match(/^\/api\/clubs\/(\d+)\/veto$/);
+  if (clubVeto && method === "POST") {
+    const { nominationId } = await readBody(req);
+    if (nominationId == null) return json({ error: "nominationId is required" }, 400);
+    const r = await core.vetoNomination(db, user.id, Number(clubVeto[1]), Number(nominationId));
+    if (r.error) return json({ error: r.error }, 400);
+    const detail = await core.getClub(db, user.id, Number(clubVeto[1]));
+    return json(detail.error ? { ok: true } : { club: detail.club });
+  }
   const clubCloseVote = path.match(/^\/api\/clubs\/(\d+)\/close-vote$/);
   if (clubCloseVote && method === "POST") {
     const r = await core.closeVote(db, user.id, Number(clubCloseVote[1]));
@@ -755,14 +764,14 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
 
         // Tell the browser's EventSource to reconnect quickly after the
         // server-side close below.
-        send("retry: 3000\n\n");
+        send("retry: 2000\n\n");
         send(`data: ${JSON.stringify({ club: initial.club })}\n\n`);
-        timer = setInterval(tick, 1000);
-        // Workers budget subrequests per invocation, so don't hold one
-        // stream open forever — close well before exhausting them. The
-        // EventSource reconnects automatically (the client's poll
-        // fallback covers the brief gap).
-        setTimeout(() => close(), 35_000);
+        // Half-second change checks keep vote counts effectively real-time.
+        // The lifetime keeps version checks within the Workers subrequest
+        // budget; the EventSource reconnects automatically (the client's
+        // poll fallback covers the brief gap).
+        timer = setInterval(tick, 500);
+        setTimeout(() => close(), 20_000);
       },
       cancel() {
         alive = false;

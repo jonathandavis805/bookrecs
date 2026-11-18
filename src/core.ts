@@ -1241,6 +1241,8 @@ export interface ClubNominationRow {
   user_id: number;
   nominatedBy: string;
   votes: number;
+  vetoed_by: number | null;
+  vetoedBy: string | null;
   created_at: number;
 }
 
@@ -1283,6 +1285,7 @@ export interface ClubDetail {
   members: ClubMemberRow[];
   nominations: ClubNominationRow[];
   myVote: number | null;
+  myVetoUsed: boolean;
   currentPick: ClubPickRow | null;
   pastPicks: ClubPickRow[];
 }
@@ -1418,8 +1421,9 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
 
   const nominations = await queryAll<ClubNominationRow>(
     db,
-    `SELECT n.id, n.book_id, n.user_id, n.created_at,
+    `SELECT n.id, n.book_id, n.user_id, n.created_at, n.vetoed_by,
        u.username AS nominatedBy,
+       (SELECT username FROM users WHERE id = n.vetoed_by) AS vetoedBy,
        b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual,
        (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id) AS votes
      FROM club_nominations n
@@ -1438,6 +1442,12 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
     userId, clubId
   );
 
+  const myVetoRow = await queryOne(
+    db,
+    "SELECT 1 FROM club_nominations WHERE club_id = ? AND vetoed_by = ?",
+    clubId, userId
+  );
+
   const picks = await queryAll<ClubPickRow>(
     db,
     `SELECT p.id, p.book_id, p.picked_at, b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual
@@ -1453,6 +1463,7 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
     members,
     nominations,
     myVote: myVoteRow?.nomination_id ?? null,
+    myVetoUsed: !!myVetoRow,
     currentPick: picks[0] ?? null,
     pastPicks: picks.slice(1),
   };
@@ -1571,7 +1582,9 @@ export async function nominateBook(
 
   const nomination = await queryOne<ClubNominationRow>(
     db,
-    `SELECT n.id, n.book_id, n.user_id, n.created_at, u.username AS nominatedBy,
+    `SELECT n.id, n.book_id, n.user_id, n.created_at, n.vetoed_by,
+       u.username AS nominatedBy,
+       (SELECT username FROM users WHERE id = n.vetoed_by) AS vetoedBy,
        b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual,
        (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id) AS votes
      FROM club_nominations n JOIN books b ON b.id = n.book_id JOIN users u ON u.id = n.user_id
@@ -1593,8 +1606,13 @@ export async function voteForNomination(
   if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
   if (club.voting_open !== 1) return { ok: false, error: "Voting is closed for the current pick" };
 
-  const nomination = await queryOne(db, "SELECT 1 FROM club_nominations WHERE id = ? AND club_id = ?", nominationId, clubId);
+  const nomination = await queryOne<{ vetoed_by: number | null }>(
+    db,
+    "SELECT vetoed_by FROM club_nominations WHERE id = ? AND club_id = ?",
+    nominationId, clubId
+  );
   if (!nomination) return { ok: false, error: "Nomination not found" };
+  if (nomination.vetoed_by != null) return { ok: false, error: "That nomination was vetoed" };
 
   // One vote per member per club: replace any previous vote.
   await execute(
@@ -1615,6 +1633,45 @@ export async function removeVote(db: D1Database, userId: number, clubId: number)
   return { ok: true };
 }
 
+export async function vetoNomination(
+  db: D1Database,
+  userId: number,
+  clubId: number,
+  nominationId: number
+): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
+  if (club.voting_open !== 1) return { ok: false, error: "Voting is closed for the current pick" };
+
+  const nomination = await queryOne<{ vetoed_by: number | null; title: string }>(
+    db,
+    `SELECT n.vetoed_by, b.title FROM club_nominations n JOIN books b ON b.id = n.book_id
+     WHERE n.id = ? AND n.club_id = ?`,
+    nominationId, clubId
+  );
+  if (!nomination) return { ok: false, error: "Nomination not found" };
+  if (nomination.vetoed_by != null) return { ok: false, error: "That nomination was already vetoed" };
+
+  // One veto per member per vote cycle (a cycle's vetoes die with its
+  // nominations when the vote closes).
+  const used = await queryOne(db, "SELECT 1 FROM club_nominations WHERE club_id = ? AND vetoed_by = ?", clubId, userId);
+  if (used) return { ok: false, error: "You've already used your veto for this vote" };
+
+  await execute(db, "UPDATE club_nominations SET vetoed_by = ? WHERE id = ?", userId, nominationId);
+  // Anyone voting for it gets their vote back.
+  await execute(db, "DELETE FROM club_votes WHERE nomination_id = ?", nominationId);
+
+  const vetoer = await getUserById(db, userId);
+  await notifyAcceptedMembers(
+    db, clubId, userId, "club_veto",
+    `@${vetoer?.username ?? "Someone"} vetoed "${nomination.title}" in "${club.name}"`,
+    { clubId, name: club.name, bookTitle: nomination.title }
+  );
+  return { ok: true };
+}
+
 export async function closeVote(
   db: D1Database,
   userId: number,
@@ -1626,15 +1683,19 @@ export async function closeVote(
   if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can close the vote" };
   if (club.voting_open !== 1) return { ok: false, error: "Voting is already closed" };
 
+  // Vetoed nominations can't win — only active ones count.
   const nominations = await queryAll<{ id: number; book_id: number; title: string; votes: number; created_at: number }>(
     db,
     `SELECT n.id, n.book_id, n.created_at, b.title,
        (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id) AS votes
      FROM club_nominations n JOIN books b ON b.id = n.book_id
-     WHERE n.club_id = ?`,
+     WHERE n.club_id = ? AND n.vetoed_by IS NULL`,
     clubId
   );
-  if (nominations.length === 0) return { ok: false, error: "No nominations yet" };
+  if (nominations.length === 0) {
+    const anyVetoed = await queryOne(db, "SELECT 1 FROM club_nominations WHERE club_id = ? AND vetoed_by IS NOT NULL", clubId);
+    return { ok: false, error: anyVetoed ? "Every nomination was vetoed" : "No nominations yet" };
+  }
   const totalVotes = nominations.reduce((sum, n) => sum + n.votes, 0);
   if (totalVotes === 0) return { ok: false, error: "No votes cast yet" };
 
@@ -1771,7 +1832,7 @@ export async function transferClubOwnership(
 
 // Cheap change detection for the live club stream: the string shifts any
 // time something visible on the club page changes (club, membership, roles,
-// nominations, votes, picks). One query per check.
+// nominations, vetoes, votes, picks). One query per check.
 export async function getClubVersion(db: D1Database, clubId: number): Promise<string> {
   const row = await queryOne<{ c: string }>(
     db,
@@ -1781,12 +1842,13 @@ export async function getClubVersion(db: D1Database, clubId: number): Promise<st
        (SELECT COUNT(*) FROM club_members WHERE club_id = ? AND role = 'owner') || '-' ||
        (SELECT COUNT(*) FROM club_members WHERE club_id = ? AND status = 'accepted') || '-' ||
        (SELECT COUNT(*) FROM club_nominations WHERE club_id = ?) || '-' ||
+       (SELECT COUNT(*) FROM club_nominations WHERE club_id = ? AND vetoed_by IS NOT NULL) || '-' ||
        (SELECT COUNT(*) FROM club_votes v JOIN club_nominations n ON n.id = v.nomination_id WHERE n.club_id = ?) || '-' ||
        (SELECT COALESCE(MAX(v.created_at), 0) FROM club_votes v JOIN club_nominations n ON n.id = v.nomination_id WHERE n.club_id = ?) || '-' ||
        (SELECT COALESCE(MAX(created_at), 0) FROM club_nominations WHERE club_id = ?) || '-' ||
        (SELECT COUNT(*) FROM club_picks WHERE club_id = ?)
      AS c`,
-    clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId
+    clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId
   );
-  return row?.c ?? "0-0-0-0-0-0-0-0-0";
+  return row?.c ?? "0-0-0-0-0-0-0-0-0-0";
 }

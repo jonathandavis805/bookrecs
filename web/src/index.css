@@ -1748,3 +1748,27 @@ button.secondary:hover:not(:disabled) {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ---------- Vetoed nominations ---------- */
+.club-nomination-row.vetoed {
+  opacity: 0.55;
+}
+
+.club-nomination-row.vetoed .title {
+  text-decoration: line-through;
+}
+
+.club-nomination-row.vetoed .title .badge {
+  text-decoration: none;
+}
+
+.badge.veto-badge {
+  margin-left: 8px;
+  color: var(--danger);
+  border-color: var(--danger);
+  background: transparent;
+}
+
+.club-veto-btn {
+  color: var(--danger);
+}
