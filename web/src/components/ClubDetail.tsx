@@ -30,14 +30,20 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
-  async function load() {
+  async function load(background = false) {
     try {
       const d = await api<{ club: ClubDetailData }>(`/api/clubs/${clubId}`);
       setData(d.club);
       setError("");
     } catch (e: any) {
-      setError(e.message);
-      setData(null);
+      // A background poll shouldn't tear down the page on a transient
+      // blip — but losing your membership or the club itself is a real
+      // state change worth surfacing immediately.
+      const gone = /not a member|haven't joined|Club not found/i.test(e.message ?? "");
+      if (!background || gone) {
+        setError(e.message);
+        setData(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -45,6 +51,13 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
 
   useEffect(() => {
     load();
+    // Live updates: other members' nominations, votes, and picks appear
+    // without a manual refresh. The endpoint is one cheap query, and ticks
+    // are skipped while the tab is hidden.
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") load(true);
+    }, 5000);
+    return () => clearInterval(interval);
   }, [clubId]);
 
   if (loading) {
