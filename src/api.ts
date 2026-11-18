@@ -606,6 +606,96 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     return json({ friends: await core.listFriends(db, user.id) });
   }
 
+  // ----- clubs -----
+  if (path === "/api/clubs" && method === "POST") {
+    const { name, description, usernames } = await readBody(req);
+    const r = await core.createClub(
+      db, user.id, name, description,
+      Array.isArray(usernames) ? usernames.map(String) : []
+    );
+    if (r.error) return json({ error: r.error }, 400);
+    return json({ club: r.club, invited: r.invited ?? [], skipped: r.skipped ?? [] });
+  }
+  if (path === "/api/clubs" && method === "GET") {
+    return json(await core.listClubsForUser(db, user.id));
+  }
+  const clubRespond = path.match(/^\/api\/clubs\/(\d+)\/respond$/);
+  if (clubRespond && method === "POST") {
+    const { accept } = await readBody(req);
+    const r = await core.respondToClubInvite(db, user.id, Number(clubRespond[1]), !!accept);
+    if (r.error) return json({ error: r.error }, 400);
+    return json({ ok: true, ...(await core.listClubsForUser(db, user.id)) });
+  }
+  const clubInvite = path.match(/^\/api\/clubs\/(\d+)\/invite$/);
+  if (clubInvite && method === "POST") {
+    const { username } = await readBody(req);
+    const r = await core.inviteToClub(db, user.id, Number(clubInvite[1]), username);
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubNominate = path.match(/^\/api\/clubs\/(\d+)\/nominate$/);
+  if (clubNominate && method === "POST") {
+    const { ol_key, book_id, year } = await readBody(req);
+    const r = await core.nominateBook(db, user.id, Number(clubNominate[1]), {
+      olKey: ol_key,
+      bookId: book_id != null ? Number(book_id) : undefined,
+      year: year != null ? Number(year) : undefined,
+    });
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubVote = path.match(/^\/api\/clubs\/(\d+)\/vote$/);
+  if (clubVote && method === "POST") {
+    const { nominationId } = await readBody(req);
+    if (nominationId == null) return json({ error: "nominationId is required" }, 400);
+    const r = await core.voteForNomination(db, user.id, Number(clubVote[1]), Number(nominationId));
+    if (r.error) return json({ error: r.error }, 400);
+    const detail = await core.getClub(db, user.id, Number(clubVote[1]));
+    return json(detail.error ? { ok: true } : { club: detail.club });
+  }
+  if (clubVote && method === "DELETE") {
+    const r = await core.removeVote(db, user.id, Number(clubVote[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    const detail = await core.getClub(db, user.id, Number(clubVote[1]));
+    return json(detail.error ? { ok: true } : { club: detail.club });
+  }
+  const clubCloseVote = path.match(/^\/api\/clubs\/(\d+)\/close-vote$/);
+  if (clubCloseVote && method === "POST") {
+    const r = await core.closeVote(db, user.id, Number(clubCloseVote[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubReopenVote = path.match(/^\/api\/clubs\/(\d+)\/reopen-vote$/);
+  if (clubReopenVote && method === "POST") {
+    const r = await core.reopenVote(db, user.id, Number(clubReopenVote[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubRemoveMember = path.match(/^\/api\/clubs\/(\d+)\/members\/(\d+)$/);
+  if (clubRemoveMember && method === "DELETE") {
+    const r = await core.removeClubMember(db, user.id, Number(clubRemoveMember[1]), Number(clubRemoveMember[2]));
+    if (r.error) return json({ error: r.error }, 400);
+    const detail = await core.getClub(db, user.id, Number(clubRemoveMember[1]));
+    return json(detail.error ? { ok: true } : { club: detail.club });
+  }
+  const clubLeave = path.match(/^\/api\/clubs\/(\d+)\/leave$/);
+  if (clubLeave && method === "POST") {
+    const r = await core.leaveClub(db, user.id, Number(clubLeave[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    return json({ ok: true, ...(await core.listClubsForUser(db, user.id)) });
+  }
+  const clubMatch = path.match(/^\/api\/clubs\/(\d+)$/);
+  if (clubMatch && method === "GET") {
+    const r = await core.getClub(db, user.id, Number(clubMatch[1]));
+    if (r.error) return json({ error: r.error }, r.error === "Club not found" ? 404 : 403);
+    return json({ club: r.club });
+  }
+  if (clubMatch && method === "DELETE") {
+    const r = await core.deleteClub(db, user.id, Number(clubMatch[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    return json({ ok: true });
+  }
+
   // ----- notifications -----
   if (path === "/api/notifications" && method === "GET") {
     const notifications = await core.getNotifications(db, user.id);

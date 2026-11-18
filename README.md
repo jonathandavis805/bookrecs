@@ -13,6 +13,11 @@ are each **public or private** (friends only see the public ones); your
 **currently reading** is always visible to friends. Click any book title to see
 its **detail page** with synopsis, friend activity, and review carousel.
 
+Start a **book club** with a group of friends: nominate books from Open
+Library, vote for the next read (one vote per member, changeable until the vote
+closes), and the winning pick becomes the club's **current read** — with the
+full pick history kept. Clubs are invite-only among friends.
+
 Runs on **Cloudflare Workers** + **D1** + **Pages**.
 
 ## Stack
@@ -198,6 +203,19 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 | POST | `/api/friends/requests/:id/decline` | decline |
 | GET  | `/api/friends/:username/books` | a friend's public books (each flagged `mine`) |
 | DELETE | `/api/friends/:id` | unfriend |
+| POST | `/api/clubs` | create `{name, description?, usernames?[]}` (invitees must be friends) |
+| GET  | `/api/clubs` | your clubs + pending invites |
+| GET  | `/api/clubs/:id` | club detail: members, nominations (with counts), your vote, current + past picks |
+| POST | `/api/clubs/:id/invite` | `{username}` invite a friend (members only) |
+| POST | `/api/clubs/:id/respond` | `{accept}` accept/decline your invite |
+| POST | `/api/clubs/:id/nominate` | `{ol_key?, book_id?, year?}` nominate a book (while voting is open) |
+| POST | `/api/clubs/:id/vote` | `{nominationId}` cast/move your one vote |
+| DELETE | `/api/clubs/:id/vote` | remove your vote |
+| POST | `/api/clubs/:id/close-vote` | owner: most votes wins, becomes the current read |
+| POST | `/api/clubs/:id/reopen-vote` | owner: start a new nomination/vote cycle |
+| DELETE | `/api/clubs/:id/members/:userId` | owner: remove a member / cancel invite |
+| POST | `/api/clubs/:id/leave` | member: leave the club |
+| DELETE | `/api/clubs/:id` | owner: delete the club |
 
 ## Notes
 
@@ -211,6 +229,13 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   `#/u/<username>` — so reloading keeps you on the same page.
 - Friend requests are mutual: a pending request from the other side is
   auto-accepted when you send yours.
+- **Book clubs** live under the Clubs tab. The owner creates a club and invites
+  friends (anyone in the club can invite their own friends). While voting is
+  open, members nominate books from Open Library and each cast one vote (you
+  can move or remove your vote). The owner closes the vote, the most-voted
+  book wins (ties go to the earliest nomination), and it becomes the club's
+  current read with a one-tap "Start reading" into your personal list. The
+  owner can then start a fresh vote; past picks are kept on the club page.
 - Starting a book is one tap: every book on a friend's profile has a "📖 Reading"
   quick action (plus "♡ Wishlist"), and your own wishlist items have a
   "📖 Reading" button to start reading them.

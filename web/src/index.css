@@ -1399,3 +1399,276 @@ button.secondary:hover:not(:disabled) {
   color: var(--muted);
   margin-top: 4px;
 }
+
+/* ---------- Clubs ---------- */
+.club-invites {
+  margin-bottom: 24px;
+}
+
+.club-invite-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.club-invite-row + .club-invite-row {
+  margin-top: 8px;
+}
+
+.club-invite-row .actions {
+  display: flex;
+  gap: 8px;
+}
+
+.club-list .club-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.club-list .club-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+.club-list .club-card + .club-card {
+  margin-top: 10px;
+}
+
+.club-card-main {
+  min-width: 0;
+}
+
+.club-card-main .title {
+  font-weight: 600;
+}
+
+.club-current-pick {
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.club-chevron {
+  color: var(--muted);
+  flex: none;
+}
+
+.badge.owner-badge {
+  margin-left: 8px;
+  font-size: 11px;
+}
+
+.badge.vote-badge {
+  margin-left: 8px;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: transparent;
+}
+
+.club-section {
+  margin-top: 28px;
+}
+
+.club-section .section-title {
+  margin-bottom: 10px;
+}
+
+.club-closed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.club-owner-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.club-nominate {
+  margin-bottom: 16px;
+}
+
+.club-nominate .result-list {
+  margin-top: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 0 2px;
+}
+
+.club-nomination-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--card);
+}
+
+.club-nomination-row + .club-nomination-row {
+  margin-top: 8px;
+}
+
+.club-nomination-row.my-vote {
+  border-color: var(--accent);
+}
+
+.club-vote-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 14px;
+  margin-right: 10px;
+}
+
+.club-myvote-note {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.club-current {
+  margin-top: 8px;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.club-current .section-title {
+  margin-bottom: 8px;
+}
+
+.club-pick-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--card);
+}
+
+.club-pick-row + .club-pick-row {
+  margin-top: 8px;
+}
+
+.club-member-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.club-member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.club-member + .club-member {
+  margin-top: 6px;
+}
+
+.club-member-name {
+  font-weight: 600;
+}
+
+.club-member-tags {
+  font-size: 13px;
+}
+
+.club-member-remove {
+  margin-left: auto;
+  color: var(--muted);
+  padding: 6px;
+  border-radius: 6px;
+}
+
+.club-member-remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: rgba(179, 64, 64, 0.08);
+  text-decoration: none;
+}
+
+.club-invite-box {
+  margin-top: 12px;
+}
+
+.club-invite-box input {
+  margin-bottom: 8px;
+}
+
+.club-friend-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.club-friend-chip {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: var(--card);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.club-friend-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.club-friend-chip.picked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.club-footer-actions {
+  margin-top: 14px;
+}
+
+.danger-link {
+  color: var(--danger);
+}
+
+.notification-open-link {
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .club-invite-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .club-closed-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

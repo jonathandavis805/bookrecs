@@ -1200,12 +1200,520 @@ const REJECTION_GRACE_PERIOD_DAYS = 7;
 export async function cleanupRejectedUsers(db: D1Database): Promise<{ deleted: number }> {
   const gracePeriodSeconds = REJECTION_GRACE_PERIOD_DAYS * 24 * 60 * 60;
   const cutoffTime = now() - gracePeriodSeconds;
-  
+
   const result = await execute(
     db,
     "DELETE FROM users WHERE status = 'rejected' AND rejected_at IS NOT NULL AND rejected_at < ?",
     cutoffTime
   );
-  
+
   return { deleted: result.changes || 0 };
+}
+
+// ---------- Clubs ----------
+
+export interface ClubRow {
+  id: number;
+  name: string;
+  description: string | null;
+  creator_id: number;
+  voting_open: number;
+  created_at: number;
+}
+
+export interface ClubMemberRow {
+  user_id: number;
+  username: string;
+  role: "owner" | "member";
+  status: "pending" | "accepted";
+  joined_at: number;
+}
+
+export interface ClubNominationRow {
+  id: number;
+  book_id: number;
+  ol_key: string;
+  title: string;
+  author: string | null;
+  cover_url: string | null;
+  first_publish_year: number | null;
+  manual: number;
+  user_id: number;
+  nominatedBy: string;
+  votes: number;
+  created_at: number;
+}
+
+export interface ClubPickRow {
+  id: number;
+  book_id: number;
+  ol_key: string;
+  title: string;
+  author: string | null;
+  cover_url: string | null;
+  first_publish_year: number | null;
+  manual: number;
+  picked_at: number;
+}
+
+export interface ClubSummary {
+  id: number;
+  name: string;
+  description: string | null;
+  role: "owner" | "member";
+  memberCount: number;
+  voting_open: number;
+  nominationCount: number;
+  currentPick: ClubPickRow | null;
+  created_at: number;
+}
+
+export interface ClubInviteSummary {
+  clubId: number;
+  name: string;
+  description: string | null;
+  inviter: string | null;
+  invited_at: number;
+}
+
+export interface ClubDetail {
+  club: ClubRow;
+  myRole: "owner" | "member";
+  votingOpen: boolean;
+  members: ClubMemberRow[];
+  nominations: ClubNominationRow[];
+  myVote: number | null;
+  currentPick: ClubPickRow | null;
+  pastPicks: ClubPickRow[];
+}
+
+async function getClubMembership(
+  db: D1Database,
+  clubId: number,
+  userId: number
+): Promise<{ role: "owner" | "member"; status: "pending" | "accepted"; invited_by: number | null } | null> {
+  return await queryOne(db, "SELECT role, status, invited_by FROM club_members WHERE club_id = ? AND user_id = ?", clubId, userId);
+}
+
+async function notifyAcceptedMembers(
+  db: D1Database,
+  clubId: number,
+  excludeUserId: number,
+  type: string,
+  message: string,
+  data?: any
+): Promise<void> {
+  const members = await queryAll<{ user_id: number }>(
+    db,
+    "SELECT user_id FROM club_members WHERE club_id = ? AND status = 'accepted' AND user_id != ?",
+    clubId, excludeUserId
+  );
+  for (const m of members) {
+    await createNotification(db, m.user_id, type, message, data);
+  }
+}
+
+export async function createClub(
+  db: D1Database,
+  creatorId: number,
+  name: string,
+  description?: string,
+  usernames: string[] = []
+): Promise<{ ok: boolean; error?: string; club?: ClubRow; invited?: string[]; skipped?: string[] }> {
+  const cleanName = typeof name === "string" ? name.trim() : "";
+  if (!cleanName) return { ok: false, error: "Club name is required" };
+  if (cleanName.length > 80) return { ok: false, error: "Club name must be 80 characters or fewer" };
+  const cleanDesc = typeof description === "string" && description.trim() ? description.trim().slice(0, 500) : null;
+
+  const creator = await getUserById(db, creatorId);
+  const creatorName = creator?.username ?? "Someone";
+
+  await execute(db, "INSERT INTO clubs (name, description, creator_id) VALUES (?, ?, ?)", cleanName, cleanDesc, creatorId);
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE creator_id = ? ORDER BY id DESC LIMIT 1", creatorId);
+  if (!club) return { ok: false, error: "Could not create club" };
+  await execute(
+    db,
+    "INSERT INTO club_members (club_id, user_id, role, status, invited_by) VALUES (?, ?, 'owner', 'accepted', ?)",
+    club.id, creatorId, creatorId
+  );
+
+  const invited: string[] = [];
+  const skipped: string[] = [];
+  for (const raw of usernames.slice(0, 50)) {
+    const target = await findUser(db, String(raw).trim());
+    if (!target || target.id === creatorId) { skipped.push(String(raw).trim()); continue; }
+    const existing = await getClubMembership(db, club.id, target.id);
+    if (existing) { skipped.push(target.username); continue; }
+    if (!(await isFriend(db, creatorId, target.id))) { skipped.push(target.username); continue; }
+    await execute(
+      db,
+      "INSERT INTO club_members (club_id, user_id, role, status, invited_by) VALUES (?, ?, 'member', 'pending', ?)",
+      club.id, target.id, creatorId
+    );
+    await createNotification(
+      db, target.id, "club_invite",
+      `@${creatorName} invited you to the club "${cleanName}"`,
+      { clubId: club.id, name: cleanName, userId: creatorId, username: creatorName }
+    );
+    invited.push(target.username);
+  }
+
+  return { ok: true, club, invited, skipped };
+}
+
+export async function listClubsForUser(db: D1Database, userId: number): Promise<{ clubs: ClubSummary[]; invites: ClubInviteSummary[] }> {
+  const clubs = await queryAll<ClubSummary & { creator_id: number }>(
+    db,
+    `SELECT c.id, c.name, c.description, c.creator_id, c.voting_open, c.created_at, m.role,
+       (SELECT COUNT(*) FROM club_members cm WHERE cm.club_id = c.id AND cm.status = 'accepted') AS memberCount,
+       (SELECT COUNT(*) FROM club_nominations n WHERE n.club_id = c.id) AS nominationCount
+     FROM clubs c JOIN club_members m ON m.club_id = c.id
+     WHERE m.user_id = ? AND m.status = 'accepted'
+     ORDER BY c.created_at DESC`,
+    userId
+  );
+
+  const invites = await queryAll<ClubInviteSummary>(
+    db,
+    `SELECT m.club_id AS clubId, c.name, c.description, m.joined_at AS invited_at,
+       (SELECT username FROM users WHERE id = m.invited_by) AS inviter
+     FROM club_members m JOIN clubs c ON c.id = m.club_id
+     WHERE m.user_id = ? AND m.status = 'pending'
+     ORDER BY m.joined_at DESC`,
+    userId
+  );
+
+  // Attach each club's current (latest) pick
+  const summaries: ClubSummary[] = [];
+  for (const c of clubs) {
+    const pick = await queryOne<ClubPickRow>(
+      db,
+      `SELECT p.id, p.book_id, p.picked_at, b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual
+       FROM club_picks p JOIN books b ON b.id = p.book_id
+       WHERE p.club_id = ? ORDER BY p.picked_at DESC, p.id DESC LIMIT 1`,
+      c.id
+    );
+    const { creator_id, ...rest } = c;
+    summaries.push({ ...rest, currentPick: pick ?? null });
+  }
+
+  return { clubs: summaries, invites };
+}
+
+export async function getClub(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string; club?: ClubDetail }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership) return { ok: false, error: "You are not a member of this club" };
+  if (membership.status !== "accepted") return { ok: false, error: "You haven't joined this club yet" };
+
+  const members = await queryAll<ClubMemberRow>(
+    db,
+    `SELECT m.user_id, u.username, m.role, m.status, m.joined_at
+     FROM club_members m JOIN users u ON u.id = m.user_id
+     WHERE m.club_id = ?
+     ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END, CASE m.status WHEN 'accepted' THEN 0 ELSE 1 END, u.username COLLATE NOCASE`,
+    clubId
+  );
+
+  const nominations = await queryAll<ClubNominationRow>(
+    db,
+    `SELECT n.id, n.book_id, n.user_id, n.created_at,
+       u.username AS nominatedBy,
+       b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual,
+       (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id) AS votes
+     FROM club_nominations n
+     JOIN books b ON b.id = n.book_id
+     JOIN users u ON u.id = n.user_id
+     WHERE n.club_id = ?
+     ORDER BY n.created_at ASC`,
+    clubId
+  );
+
+  const myVoteRow = await queryOne<{ nomination_id: number }>(
+    db,
+    `SELECT v.nomination_id FROM club_votes v
+     JOIN club_nominations n ON n.id = v.nomination_id
+     WHERE v.user_id = ? AND n.club_id = ?`,
+    userId, clubId
+  );
+
+  const picks = await queryAll<ClubPickRow>(
+    db,
+    `SELECT p.id, p.book_id, p.picked_at, b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual
+     FROM club_picks p JOIN books b ON b.id = p.book_id
+     WHERE p.club_id = ? ORDER BY p.picked_at DESC, p.id DESC`,
+    clubId
+  );
+
+  const detail: ClubDetail = {
+    club,
+    myRole: membership.role,
+    votingOpen: club.voting_open === 1,
+    members,
+    nominations,
+    myVote: myVoteRow?.nomination_id ?? null,
+    currentPick: picks[0] ?? null,
+    pastPicks: picks.slice(1),
+  };
+  return { ok: true, club: detail };
+}
+
+export async function inviteToClub(
+  db: D1Database,
+  inviterId: number,
+  clubId: number,
+  username: string
+): Promise<{ ok: boolean; error?: string; username?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, inviterId);
+  if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
+
+  const target = await findUser(db, String(username ?? "").trim());
+  if (!target) return { ok: false, error: "User not found" };
+  if (target.id === inviterId) return { ok: false, error: "You are already in this club" };
+  if (!(await isFriend(db, inviterId, target.id))) return { ok: false, error: "You can only invite friends" };
+  const existing = await getClubMembership(db, clubId, target.id);
+  if (existing) {
+    return { ok: false, error: existing.status === "accepted" ? `${target.username} is already a member` : `${target.username} is already invited` };
+  }
+
+  const inviter = await getUserById(db, inviterId);
+  const inviterName = inviter?.username ?? "Someone";
+
+  await execute(
+    db,
+    "INSERT INTO club_members (club_id, user_id, role, status, invited_by) VALUES (?, ?, 'member', 'pending', ?)",
+    clubId, target.id, inviterId
+  );
+  await createNotification(
+    db, target.id, "club_invite",
+    `@${inviterName} invited you to the club "${club.name}"`,
+    { clubId, name: club.name, userId: inviterId, username: inviterName }
+  );
+  return { ok: true, username: target.username };
+}
+
+export async function respondToClubInvite(
+  db: D1Database,
+  userId: number,
+  clubId: number,
+  accept: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.status !== "pending") return { ok: false, error: "No pending invite for this club" };
+
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+
+  if (accept) {
+    await execute(db, "UPDATE club_members SET status = 'accepted' WHERE club_id = ? AND user_id = ?", clubId, userId);
+    const joiner = await getUserById(db, userId);
+    if (joiner && membership.invited_by) {
+      await createNotification(
+        db, membership.invited_by, "club_joined",
+        `@${joiner.username} joined the club "${club.name}"`,
+        { clubId, name: club.name, userId, username: joiner.username }
+      );
+    }
+  } else {
+    await execute(db, "DELETE FROM club_members WHERE club_id = ? AND user_id = ?", clubId, userId);
+  }
+  return { ok: true };
+}
+
+export async function nominateBook(
+  db: D1Database,
+  userId: number,
+  clubId: number,
+  opts: { olKey?: string; bookId?: number; year?: number }
+): Promise<{ ok: boolean; error?: string; nomination?: ClubNominationRow }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
+  if (club.voting_open !== 1) return { ok: false, error: "Voting is closed for the current pick" };
+
+  let book: BookRow | null = null;
+  if (opts.bookId != null) {
+    book = await getBookById(db, Number(opts.bookId));
+    if (!book) return { ok: false, error: "Book not found" };
+  } else if (opts.olKey) {
+    book = await getOrCreateBookByKey(db, opts.olKey, opts.year);
+    if (!book) return { ok: false, error: "Could not load book from Open Library" };
+  } else {
+    return { ok: false, error: "ol_key or book_id is required" };
+  }
+
+  const dup = await queryOne(db, "SELECT 1 FROM club_nominations WHERE club_id = ? AND book_id = ?", clubId, book.id);
+  if (dup) return { ok: false, error: "That book is already nominated" };
+
+  await execute(db, "INSERT INTO club_nominations (club_id, user_id, book_id) VALUES (?, ?, ?)", clubId, userId, book.id);
+
+  const nominator = await getUserById(db, userId);
+  await notifyAcceptedMembers(
+    db, clubId, userId, "club_nomination",
+    `@${nominator?.username ?? "Someone"} nominated "${book.title}" in "${club.name}"`,
+    { clubId, name: club.name, nominationBook: book.title }
+  );
+
+  const nomination = await queryOne<ClubNominationRow>(
+    db,
+    `SELECT n.id, n.book_id, n.user_id, n.created_at, u.username AS nominatedBy,
+       b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual,
+       (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id) AS votes
+     FROM club_nominations n JOIN books b ON b.id = n.book_id JOIN users u ON u.id = n.user_id
+     WHERE n.club_id = ? AND n.book_id = ?`,
+    clubId, book.id
+  );
+  return { ok: true, nomination: nomination ?? undefined };
+}
+
+export async function voteForNomination(
+  db: D1Database,
+  userId: number,
+  clubId: number,
+  nominationId: number
+): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
+  if (club.voting_open !== 1) return { ok: false, error: "Voting is closed for the current pick" };
+
+  const nomination = await queryOne(db, "SELECT 1 FROM club_nominations WHERE id = ? AND club_id = ?", nominationId, clubId);
+  if (!nomination) return { ok: false, error: "Nomination not found" };
+
+  // One vote per member per club: replace any previous vote.
+  await execute(
+    db,
+    "DELETE FROM club_votes WHERE user_id = ? AND nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)",
+    userId, clubId
+  );
+  await execute(db, "INSERT INTO club_votes (nomination_id, user_id) VALUES (?, ?)", nominationId, userId);
+  return { ok: true };
+}
+
+export async function removeVote(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string }> {
+  await execute(
+    db,
+    "DELETE FROM club_votes WHERE user_id = ? AND nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)",
+    userId, clubId
+  );
+  return { ok: true };
+}
+
+export async function closeVote(
+  db: D1Database,
+  userId: number,
+  clubId: number
+): Promise<{ ok: boolean; error?: string; pick?: ClubPickRow }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can close the vote" };
+  if (club.voting_open !== 1) return { ok: false, error: "Voting is already closed" };
+
+  const nominations = await queryAll<{ id: number; book_id: number; title: string; votes: number; created_at: number }>(
+    db,
+    `SELECT n.id, n.book_id, n.created_at, b.title,
+       (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id) AS votes
+     FROM club_nominations n JOIN books b ON b.id = n.book_id
+     WHERE n.club_id = ?`,
+    clubId
+  );
+  if (nominations.length === 0) return { ok: false, error: "No nominations yet" };
+  const totalVotes = nominations.reduce((sum, n) => sum + n.votes, 0);
+  if (totalVotes === 0) return { ok: false, error: "No votes cast yet" };
+
+  // Winner: most votes; ties broken by earliest nomination.
+  const winner = [...nominations].sort((a, b) => (b.votes - a.votes) || (a.created_at - b.created_at))[0];
+
+  await execute(db, "INSERT INTO club_picks (club_id, book_id) VALUES (?, ?)", clubId, winner.book_id);
+  await execute(db, "DELETE FROM club_votes WHERE nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)", clubId);
+  await execute(db, "DELETE FROM club_nominations WHERE club_id = ?", clubId);
+  await execute(db, "UPDATE clubs SET voting_open = 0 WHERE id = ?", clubId);
+
+  await notifyAcceptedMembers(
+    db, clubId, userId, "club_pick",
+    `"${winner.title}" won the vote in "${club.name}"`,
+    { clubId, name: club.name, bookId: winner.book_id, bookTitle: winner.title }
+  );
+
+  const pick = await queryOne<ClubPickRow>(
+    db,
+    `SELECT p.id, p.book_id, p.picked_at, b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual
+     FROM club_picks p JOIN books b ON b.id = p.book_id
+     WHERE p.club_id = ? ORDER BY p.picked_at DESC, p.id DESC LIMIT 1`,
+    clubId
+  );
+  return { ok: true, pick: pick ?? undefined };
+}
+
+export async function reopenVote(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can start a new vote" };
+  if (club.voting_open === 1) return { ok: false, error: "Voting is already open" };
+
+  await execute(db, "UPDATE clubs SET voting_open = 1 WHERE id = ?", clubId);
+  await notifyAcceptedMembers(
+    db, clubId, userId, "club_vote_reopen",
+    `Voting for the next book is open in "${club.name}"`,
+    { clubId, name: club.name }
+  );
+  return { ok: true };
+}
+
+export async function removeClubMember(
+  db: D1Database,
+  userId: number,
+  clubId: number,
+  targetUserId: number
+): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can remove members" };
+  if (targetUserId === userId) return { ok: false, error: "You can't remove yourself" };
+
+  const target = await getClubMembership(db, clubId, targetUserId);
+  if (!target) return { ok: false, error: "Member not found" };
+  if (target.role === "owner") return { ok: false, error: "You can't remove the club owner" };
+
+  await execute(db, "DELETE FROM club_members WHERE club_id = ? AND user_id = ?", clubId, targetUserId);
+  await execute(
+    db,
+    "DELETE FROM club_votes WHERE user_id = ? AND nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)",
+    targetUserId, clubId
+  );
+  return { ok: true };
+}
+
+export async function leaveClub(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership) return { ok: false, error: "You are not a member of this club" };
+  if (membership.role === "owner") return { ok: false, error: "Owners can't leave their club — delete it instead" };
+
+  await execute(db, "DELETE FROM club_members WHERE club_id = ? AND user_id = ?", clubId, userId);
+  await execute(
+    db,
+    "DELETE FROM club_votes WHERE user_id = ? AND nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)",
+    userId, clubId
+  );
+  return { ok: true };
+}
+
+export async function deleteClub(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can delete the club" };
+
+  await execute(db, "DELETE FROM clubs WHERE id = ?", clubId);
+  return { ok: true };
 }

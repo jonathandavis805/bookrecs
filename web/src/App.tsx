@@ -8,13 +8,17 @@ import Profile from "./components/Profile";
 import BookDetail from "./components/BookDetail";
 import Settings from "./components/Settings";
 import Notifications from "./components/Notifications";
+import Clubs from "./components/Clubs";
+import ClubDetail from "./components/ClubDetail";
 
 type Route =
   | { name: "books" }
   | { name: "add" }
   | { name: "friends" }
+  | { name: "clubs" }
   | { name: "profile"; username: string }
-  | { name: "book"; bookId: number };
+  | { name: "book"; bookId: number }
+  | { name: "club"; clubId: number };
 
 function parseRoute(): Route {
   const h = window.location.hash;
@@ -22,9 +26,14 @@ function parseRoute(): Route {
     const bookId = parseInt(h.slice(7), 10);
     if (!isNaN(bookId)) return { name: "book", bookId };
   }
+  if (h.startsWith("#/club/")) {
+    const clubId = parseInt(h.slice(7), 10);
+    if (!isNaN(clubId)) return { name: "club", clubId };
+  }
   if (h.startsWith("#/u/")) return { name: "profile", username: decodeURIComponent(h.slice(4)) };
   if (h === "#/add") return { name: "add" };
   if (h === "#/friends") return { name: "friends" };
+  if (h === "#/clubs") return { name: "clubs" };
   return { name: "books" };
 }
 
@@ -59,7 +68,7 @@ export default function App() {
   );
 }
 
-type TabName = "books" | "add" | "friends";
+type TabName = "books" | "add" | "friends" | "clubs";
 
 function Main({
   user,
@@ -72,9 +81,12 @@ function Main({
   onLogout: () => void;
   onNavigate: (name: TabName) => void;
 }) {
-  const active = route.name === "books" || route.name === "add" || route.name === "friends" 
-    ? route.name 
-    : null;
+  const active =
+    route.name === "books" || route.name === "add" || route.name === "friends" || route.name === "clubs"
+      ? route.name
+      : route.name === "club"
+      ? "clubs"
+      : null;
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -118,6 +130,9 @@ function Main({
           <button className={active === "friends" ? "active" : ""} onClick={() => onNavigate("friends")}>
             My Account
           </button>
+          <button className={active === "clubs" ? "active" : ""} onClick={() => onNavigate("clubs")}>
+            Clubs
+          </button>
         </nav>
         <div className="userbox">
           <button
@@ -155,6 +170,14 @@ function Main({
             onFriendRequestsChanged={bumpFriendRequests}
             onOpenProfile={openProfile} 
             onChangePassword={() => setShowSettings(true)} 
+          />
+        )}
+        {active === "clubs" && <Clubs key={user.username} user={user} />}
+        {route.name === "club" && (
+          <ClubDetail
+            key={route.clubId}
+            user={user}
+            clubId={route.clubId}
           />
         )}
         {route.name === "profile" && (
