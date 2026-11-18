@@ -1,6 +1,29 @@
 import { useEffect, useState } from "react";
 import { api, User, ClubDetailData, ClubNomination, SearchHit } from "../api";
 
+function goBackToClubs() {
+  // Arrived from inside the app (the clubs list)? Go back so the browser
+  // history stays sensible. Deep-linked directly? Just open the list.
+  if (document.referrer.startsWith(window.location.origin) && window.history.length > 1) {
+    window.history.back();
+  } else {
+    window.location.hash = "#/clubs";
+  }
+}
+
+function BackToClubs() {
+  return (
+    <div className="club-back">
+      <button className="link" onClick={goBackToClubs} title="Back to clubs">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <path d="M15 18l-6-6 6-6" />
+        </svg>
+        Clubs
+      </button>
+    </div>
+  );
+}
+
 export default function ClubDetail({ user, clubId }: { user: User; clubId: number }) {
   const [data, setData] = useState<ClubDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,18 +47,20 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
     load();
   }, [clubId]);
 
-  if (loading) return <div className="page"><div className="centered">Loading…</div></div>;
+  if (loading) {
+    return (
+      <div className="page">
+        <BackToClubs />
+        <div className="empty">Loading…</div>
+      </div>
+    );
+  }
 
   if (!data) {
     return (
       <div className="page">
-        <div className="page-head">
-          <h2>Club</h2>
-        </div>
+        <BackToClubs />
         {error && <div className="error">{error}</div>}
-        <button className="link" onClick={() => (window.location.hash = "#/clubs")}>
-          Back to clubs
-        </button>
       </div>
     );
   }
@@ -100,10 +125,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
 
   return (
     <div className="page">
+      <BackToClubs />
       <div className="page-head">
-        <button className="link" onClick={() => (window.location.hash = "#/clubs")}>
-          Clubs
-        </button>
         <h2>{data.club.name}</h2>
         {data.club.description && <p className="muted">{data.club.description}</p>}
       </div>

@@ -84,8 +84,6 @@ function Main({
   const active =
     route.name === "books" || route.name === "add" || route.name === "friends" || route.name === "clubs"
       ? route.name
-      : route.name === "club"
-      ? "clubs"
       : null;
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);

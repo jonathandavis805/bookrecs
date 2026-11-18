@@ -1672,3 +1672,34 @@ button.secondary:hover:not(:disabled) {
     align-items: stretch;
   }
 }
+
+/* ---------- Club page nav ---------- */
+.club-back {
+  margin: 0 0 4px;
+}
+
+.club-back button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--muted);
+  padding: 6px 10px 6px 6px;
+  border-radius: 8px;
+}
+
+.club-back button:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.03);
+  text-decoration: none;
+}
+
+.club-back svg {
+  flex: none;
+}
+
+/* Header action buttons sit at the end of the title row, not inline after
+   the description text. */
+.page-head .btn-primary {
+  margin-left: auto;
+}
