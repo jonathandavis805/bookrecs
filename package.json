@@ -10,6 +10,8 @@
     "start": "wrangler pages dev",
     "migrate:local": "wrangler d1 migrations apply bookrecs-db --local",
     "mcp": "bun run src/mcp.ts",
+    "seed:preview": "bun scripts/seed-preview.ts",
+    "preview": "bun run build && bun run migrate:local && wrangler pages dev",
     "deploy": "npx wrangler deploy"
   },
   "devDependencies": {

@@ -13,6 +13,11 @@ are each **public or private** (friends only see the public ones); your
 **currently reading** is always visible to friends. Click any book title to see
 its **detail page** with synopsis, friend activity, and review carousel.
 
+Start a **book club** with a group of friends: nominate books from Open
+Library, vote for the next read (one vote per member, changeable until the vote
+closes), and the winning pick becomes the club's **current read** — with the
+full pick history kept. Clubs are invite-only among friends.
+
 Runs on **Cloudflare Workers** + **D1** + **Pages**.
 
 ## Stack
@@ -198,6 +203,22 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 | POST | `/api/friends/requests/:id/decline` | decline |
 | GET  | `/api/friends/:username/books` | a friend's public books (each flagged `mine`) |
 | DELETE | `/api/friends/:id` | unfriend |
+| POST | `/api/clubs` | create `{name, description?, usernames?[]}` (invitees must be friends) |
+| GET  | `/api/clubs` | your clubs + pending invites |
+| GET  | `/api/clubs/:id` | club detail: members, nominations (with counts), your vote, current + past picks |
+| GET  | `/api/clubs/:id/events` | live club detail over Server-Sent Events (single `data:` per change; `gone` event on access loss) |
+| POST | `/api/clubs/:id/invite` | `{username}` invite a friend (members only) |
+| POST | `/api/clubs/:id/respond` | `{accept}` accept/decline your invite |
+| POST | `/api/clubs/:id/nominate` | `{ol_key?, book_id?, year?}` nominate a book (while voting is open) |
+| POST | `/api/clubs/:id/vote` | `{nominationId}` cast/move your one vote |
+| POST | `/api/clubs/:id/veto` | `{nominationId}` strike a nomination (one veto per member per vote) |
+| DELETE | `/api/clubs/:id/vote` | remove your vote |
+| POST | `/api/clubs/:id/close-vote` | owner: most votes wins, becomes the current read |
+| POST | `/api/clubs/:id/reopen-vote` | owner: start a new nomination/vote cycle |
+| DELETE | `/api/clubs/:id/members/:userId` | owner: remove a member / cancel invite |
+| POST | `/api/clubs/:id/leave` | member: leave the club |
+| POST | `/api/clubs/:id/transfer` | owner: `{userId}` transfer ownership to a member and leave |
+| DELETE | `/api/clubs/:id` | owner: delete the club |
 
 ## Notes
 
@@ -211,6 +232,25 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   `#/u/<username>` — so reloading keeps you on the same page.
 - Friend requests are mutual: a pending request from the other side is
   auto-accepted when you send yours.
+- Book search and display are English-first: author names are resolved to
+  their English form (Wikidata label when available), book searches rank
+  Latin-script titles ahead of foreign-script ones, and adding a work whose
+  title is in a foreign script (e.g. "Братья Карамазовы") stores the title of
+  its most common English edition instead ("The Brothers Karamazov").
+- **Book clubs** live under the Clubs tab. The owner creates a club and invites
+  friends (anyone in the club can invite their own friends). While voting is
+  open, members nominate books from Open Library and each cast one vote (you
+  can move or remove your vote). The owner closes the vote, the most-voted
+  book wins (ties go to the earliest nomination), and it becomes the club's
+  current read with a one-tap "Start reading" into your personal list. The
+  owner can then start a fresh vote; past picks are kept on the club page.
+  Open club pages live-update over Server-Sent Events (`/api/clubs/:id/events`
+  pushes the detail within ~half a second of a change) with an automatic
+  5s-polling fallback when the stream can't connect. Nominations are ordered
+  by live vote count with animated reordering, and each member gets one veto
+  per vote: a vetoed nomination is struck (votes on it are released, it
+  can't win). Owners who want out must transfer ownership to a member or
+  delete the club.
 - Starting a book is one tap: every book on a friend's profile has a "📖 Reading"
   quick action (plus "♡ Wishlist"), and your own wishlist items have a
   "📖 Reading" button to start reading them.

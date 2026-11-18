@@ -2,7 +2,7 @@ import * as auth from "./auth";
 import * as core from "./core";
 import * as ratelimit from "./ratelimit";
 import * as twofa from "./twofa";
-import { searchBooks } from "./ol";
+import { searchBooks, isLatin } from "./ol";
 import { execute, queryOne, now } from "./db";
 
 const SESSION_COOKIE = "session";
@@ -290,13 +290,14 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
       const results = await searchBooks(q);
       const keys = results.map(r => r.key);
       const existingKeys = await core.getExistingBookKeys(db, keys);
-      const sorted = results.sort((a, b) => {
-        const aExists = existingKeys.has(a.key);
-        const bExists = existingKeys.has(b.key);
-        if (aExists && !bExists) return -1;
-        if (!aExists && bExists) return 1;
-        return 0;
-      });
+      // Books already in the system surface near the top (with the "added"
+      // flag), but that boost must never override language preference: for a
+      // Latin-script query, a foreign-script title ranks below every
+      // Latin-script one even if it's already in the system. Buckets:
+      // 0 = Latin + added, 1 = Latin + new, 2 = foreign + added, 3 = foreign + new.
+      const rank = (r: { key: string; title: string }) =>
+        (isLatin(q) && !isLatin(r.title) ? 2 : 0) + (existingKeys.has(r.key) ? 0 : 1);
+      const sorted = results.sort((a, b) => rank(a) - rank(b));
       const resultsWithFlag = sorted.map(r => ({ ...r, added: existingKeys.has(r.key) }));
       return json({ results: resultsWithFlag });
     } catch (e) {
@@ -604,6 +605,197 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (unfriend && method === "DELETE") {
     await core.removeFriend(db, user.id, Number(unfriend[1]));
     return json({ friends: await core.listFriends(db, user.id) });
+  }
+
+  // ----- clubs -----
+  if (path === "/api/clubs" && method === "POST") {
+    const { name, description, usernames } = await readBody(req);
+    const r = await core.createClub(
+      db, user.id, name, description,
+      Array.isArray(usernames) ? usernames.map(String) : []
+    );
+    if (r.error) return json({ error: r.error }, 400);
+    return json({ club: r.club, invited: r.invited ?? [], skipped: r.skipped ?? [] });
+  }
+  if (path === "/api/clubs" && method === "GET") {
+    return json(await core.listClubsForUser(db, user.id));
+  }
+  const clubRespond = path.match(/^\/api\/clubs\/(\d+)\/respond$/);
+  if (clubRespond && method === "POST") {
+    const { accept } = await readBody(req);
+    const r = await core.respondToClubInvite(db, user.id, Number(clubRespond[1]), !!accept);
+    if (r.error) return json({ error: r.error }, 400);
+    return json({ ok: true, ...(await core.listClubsForUser(db, user.id)) });
+  }
+  const clubInvite = path.match(/^\/api\/clubs\/(\d+)\/invite$/);
+  if (clubInvite && method === "POST") {
+    const { username } = await readBody(req);
+    const r = await core.inviteToClub(db, user.id, Number(clubInvite[1]), username);
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubNominate = path.match(/^\/api\/clubs\/(\d+)\/nominate$/);
+  if (clubNominate && method === "POST") {
+    const { ol_key, book_id, year } = await readBody(req);
+    const r = await core.nominateBook(db, user.id, Number(clubNominate[1]), {
+      olKey: ol_key,
+      bookId: book_id != null ? Number(book_id) : undefined,
+      year: year != null ? Number(year) : undefined,
+    });
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubVote = path.match(/^\/api\/clubs\/(\d+)\/vote$/);
+  if (clubVote && method === "POST") {
+    const { nominationId } = await readBody(req);
+    if (nominationId == null) return json({ error: "nominationId is required" }, 400);
+    const r = await core.voteForNomination(db, user.id, Number(clubVote[1]), Number(nominationId));
+    if (r.error) return json({ error: r.error }, 400);
+    const detail = await core.getClub(db, user.id, Number(clubVote[1]));
+    return json(detail.error ? { ok: true } : { club: detail.club });
+  }
+  if (clubVote && method === "DELETE") {
+    const r = await core.removeVote(db, user.id, Number(clubVote[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    const detail = await core.getClub(db, user.id, Number(clubVote[1]));
+    return json(detail.error ? { ok: true } : { club: detail.club });
+  }
+  const clubVeto = path.match(/^\/api\/clubs\/(\d+)\/veto$/);
+  if (clubVeto && method === "POST") {
+    const { nominationId } = await readBody(req);
+    if (nominationId == null) return json({ error: "nominationId is required" }, 400);
+    const r = await core.vetoNomination(db, user.id, Number(clubVeto[1]), Number(nominationId));
+    if (r.error) return json({ error: r.error }, 400);
+    const detail = await core.getClub(db, user.id, Number(clubVeto[1]));
+    return json(detail.error ? { ok: true } : { club: detail.club });
+  }
+  const clubCloseVote = path.match(/^\/api\/clubs\/(\d+)\/close-vote$/);
+  if (clubCloseVote && method === "POST") {
+    const r = await core.closeVote(db, user.id, Number(clubCloseVote[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubReopenVote = path.match(/^\/api\/clubs\/(\d+)\/reopen-vote$/);
+  if (clubReopenVote && method === "POST") {
+    const r = await core.reopenVote(db, user.id, Number(clubReopenVote[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubRemoveMember = path.match(/^\/api\/clubs\/(\d+)\/members\/(\d+)$/);
+  if (clubRemoveMember && method === "DELETE") {
+    const r = await core.removeClubMember(db, user.id, Number(clubRemoveMember[1]), Number(clubRemoveMember[2]));
+    if (r.error) return json({ error: r.error }, 400);
+    const detail = await core.getClub(db, user.id, Number(clubRemoveMember[1]));
+    return json(detail.error ? { ok: true } : { club: detail.club });
+  }
+  const clubLeave = path.match(/^\/api\/clubs\/(\d+)\/leave$/);
+  if (clubLeave && method === "POST") {
+    const r = await core.leaveClub(db, user.id, Number(clubLeave[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    return json({ ok: true, ...(await core.listClubsForUser(db, user.id)) });
+  }
+  const clubTransfer = path.match(/^\/api\/clubs\/(\d+)\/transfer$/);
+  if (clubTransfer && method === "POST") {
+    const { userId: targetUserId } = await readBody(req);
+    if (targetUserId == null) return json({ error: "userId is required" }, 400);
+    const r = await core.transferClubOwnership(db, user.id, Number(clubTransfer[1]), Number(targetUserId));
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubEvents = path.match(/^\/api\/clubs\/(\d+)\/events$/);
+  if (clubEvents && method === "GET") {
+    const targetClubId = Number(clubEvents[1]);
+    // Must be a member before we hold a stream open for them.
+    const initial = await core.getClub(db, user.id, targetClubId);
+    if (initial.error) {
+      return json({ error: initial.error }, initial.error === "Club not found" ? 404 : 403);
+    }
+    const initialVersion = await core.getClubVersion(db, targetClubId);
+
+    const encoder = new TextEncoder();
+    let alive = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const stream = new ReadableStream({
+      start(controller) {
+        let lastVersion = initialVersion;
+        let lastPing = Date.now();
+
+        const send = (chunk: string) => {
+          if (!alive) return;
+          try {
+            controller.enqueue(encoder.encode(chunk));
+          } catch {
+            alive = false;
+          }
+        };
+        const close = () => {
+          if (!alive) return;
+          alive = false;
+          if (timer) clearInterval(timer);
+          try { controller.close(); } catch { /* already closed */ }
+        };
+
+        const tick = async () => {
+          if (!alive || req.signal.aborted) return close();
+          try {
+            const version = await core.getClubVersion(db, targetClubId);
+            if (version === lastVersion) {
+              // Keepalive comment so proxies don't idle out the connection.
+              if (Date.now() - lastPing > 15000) {
+                send(": ping\n\n");
+                lastPing = Date.now();
+              }
+              return;
+            }
+            lastVersion = version;
+            const detail = await core.getClub(db, user.id, targetClubId);
+            if (detail.error) {
+              // Club deleted or membership revoked mid-stream.
+              send(`event: gone\ndata: ${JSON.stringify({ error: detail.error })}\n\n`);
+              return close();
+            }
+            lastPing = Date.now();
+            send(`data: ${JSON.stringify({ club: detail.club })}\n\n`);
+          } catch {
+            close();
+          }
+        };
+
+        // Tell the browser's EventSource to reconnect quickly after the
+        // server-side close below.
+        send("retry: 2000\n\n");
+        send(`data: ${JSON.stringify({ club: initial.club })}\n\n`);
+        // Half-second change checks keep vote counts effectively real-time.
+        // The lifetime keeps version checks within the Workers subrequest
+        // budget; the EventSource reconnects automatically (the client's
+        // poll fallback covers the brief gap).
+        timer = setInterval(tick, 500);
+        setTimeout(() => close(), 20_000);
+      },
+      cancel() {
+        alive = false;
+        if (timer) clearInterval(timer);
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache, no-transform",
+      },
+    });
+  }
+  const clubMatch = path.match(/^\/api\/clubs\/(\d+)$/);
+  if (clubMatch && method === "GET") {
+    const r = await core.getClub(db, user.id, Number(clubMatch[1]));
+    if (r.error) return json({ error: r.error }, r.error === "Club not found" ? 404 : 403);
+    return json({ club: r.club });
+  }
+  if (clubMatch && method === "DELETE") {
+    const r = await core.deleteClub(db, user.id, Number(clubMatch[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    return json({ ok: true });
   }
 
   // ----- notifications -----

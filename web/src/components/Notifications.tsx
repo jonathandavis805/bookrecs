@@ -88,6 +88,20 @@ export default function Notifications({ refreshKey, onFriendRequestsChanged, onC
     }
   }
 
+  async function respondToClubInvite(clubId: number, accept: boolean, notificationId: number) {
+    try {
+      await api(`/api/clubs/${clubId}/respond`, {
+        method: "POST",
+        body: JSON.stringify({ accept }),
+      });
+      setNotifications((prev) => prev.map((n) => (n.id === notificationId ? { ...n, read: 1 } : n)));
+      onCountChange(notifications.filter((n) => !n.read && n.id !== notificationId).length);
+      onFriendRequestsChanged();
+    } catch (err) {
+      console.error("Failed to respond to club invite:", err);
+    }
+  }
+
   function formatTime(timestamp: number): string {
     const date = new Date(timestamp * 1000);
     const now = new Date();
@@ -132,6 +146,7 @@ export default function Notifications({ refreshKey, onFriendRequestsChanged, onC
                   const data = n.data ? JSON.parse(n.data) : null;
                   const isSignupNotification = n.type === "new_user_signup";
                   const isFriendRequest = n.type === "friend_request";
+                  const isClubInvite = n.type === "club_invite";
                   const userStatus = data?.status;
                   const rejectedAt = data?.rejected_at;
                   // Handle both 'id' and 'userId' fields for backward compatibility
@@ -150,7 +165,24 @@ export default function Notifications({ refreshKey, onFriendRequestsChanged, onC
                   return (
                     <li key={n.id} className={`notification-item ${!n.read ? "unread" : ""}`}>
                       <div className="notification-content">
-                        <div className="notification-message">{n.message}</div>
+                        <div className="notification-message">
+                          {isClubInvite && !n.read && data?.clubId ? (
+                            <span>
+                              {n.message}{" "}
+                              <button
+                                className="link notification-open-link"
+                                onClick={() => {
+                                  window.location.hash = `#/clubs`;
+                                  onClose();
+                                }}
+                              >
+                                View clubs
+                              </button>
+                            </span>
+                          ) : (
+                            n.message
+                          )}
+                        </div>
                         <div className="notification-time">{formatTime(n.created_at)}</div>
                         
                         {/* Show status for processed signup notifications */}
@@ -186,6 +218,24 @@ export default function Notifications({ refreshKey, onFriendRequestsChanged, onC
                           </div>
                         )}
 
+                        {/* Show accept/decline buttons for pending club invites */}
+                        {isClubInvite && !n.read && data?.clubId && (
+                          <div className="notification-actions">
+                            <button
+                              className="btn-small btn-success"
+                              onClick={() => respondToClubInvite(data.clubId, true, n.id)}
+                            >
+                              Join
+                            </button>
+                            <button
+                              className="btn-small btn-danger"
+                              onClick={() => respondToClubInvite(data.clubId, false, n.id)}
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        )}
+
                         {/* Show approve/reject buttons only for pending users */}
                         {isSignupNotification && !n.read && userStatus === "pending" && data && targetUserId && (
                           <div className="notification-actions">
@@ -204,7 +254,7 @@ export default function Notifications({ refreshKey, onFriendRequestsChanged, onC
                           </div>
                         )}
                       </div>
-                      {!n.read && userStatus !== "pending" && (
+                      {!n.read && userStatus !== "pending" && !(isClubInvite && data?.clubId) && (
                         <button className="notification-dismiss" onClick={() => dismiss(n.id)}>
                           ×
                         </button>
