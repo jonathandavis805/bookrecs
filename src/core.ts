@@ -1768,3 +1768,25 @@ export async function transferClubOwnership(
   }
   return { ok: true };
 }
+
+// Cheap change detection for the live club stream: the string shifts any
+// time something visible on the club page changes (club, membership, roles,
+// nominations, votes, picks). One query per check.
+export async function getClubVersion(db: D1Database, clubId: number): Promise<string> {
+  const row = await queryOne<{ c: string }>(
+    db,
+    `SELECT
+       (SELECT COUNT(*) FROM clubs WHERE id = ?) || '-' ||
+       (SELECT COUNT(*) FROM club_members WHERE club_id = ?) || '-' ||
+       (SELECT COUNT(*) FROM club_members WHERE club_id = ? AND role = 'owner') || '-' ||
+       (SELECT COUNT(*) FROM club_members WHERE club_id = ? AND status = 'accepted') || '-' ||
+       (SELECT COUNT(*) FROM club_nominations WHERE club_id = ?) || '-' ||
+       (SELECT COUNT(*) FROM club_votes v JOIN club_nominations n ON n.id = v.nomination_id WHERE n.club_id = ?) || '-' ||
+       (SELECT COALESCE(MAX(v.created_at), 0) FROM club_votes v JOIN club_nominations n ON n.id = v.nomination_id WHERE n.club_id = ?) || '-' ||
+       (SELECT COALESCE(MAX(created_at), 0) FROM club_nominations WHERE club_id = ?) || '-' ||
+       (SELECT COUNT(*) FROM club_picks WHERE club_id = ?)
+     AS c`,
+    clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId
+  );
+  return row?.c ?? "0-0-0-0-0-0-0-0-0";
+}

@@ -32,6 +32,10 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const [showLeave, setShowLeave] = useState(false);
   const [transferTarget, setTransferTarget] = useState<number | null>(null);
   const [transferBusy, setTransferBusy] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [showMemberLeave, setShowMemberLeave] = useState(false);
+  const [leaveBusy, setLeaveBusy] = useState(false);
 
   async function load(background = false) {
     try {
@@ -54,13 +58,54 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
 
   useEffect(() => {
     load();
-    // Live updates: other members' nominations, votes, and picks appear
-    // without a manual refresh. The endpoint is one cheap query, and ticks
-    // are skipped while the tab is hidden.
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") load(true);
-    }, 5000);
-    return () => clearInterval(interval);
+    let poll: ReturnType<typeof setInterval> | null = null;
+    const startPolling = () => {
+      if (poll) return;
+      poll = setInterval(() => {
+        if (document.visibilityState === "visible") load(true);
+      }, 5000);
+    };
+
+    // Live updates: the server pushes club changes over Server-Sent Events
+    // the moment they happen. If the stream can't connect (blocked proxy,
+    // unsupported runtime), fall back to 5s polling — which also briefly
+    // covers the reconnect gap after the server rotates the stream.
+    const es = new EventSource(`/api/clubs/${clubId}/events`);
+    es.onopen = () => {
+      if (poll) {
+        clearInterval(poll);
+        poll = null;
+      }
+    };
+    es.onerror = () => startPolling();
+    es.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data);
+        if (d.club) {
+          setData(d.club);
+          setError("");
+        }
+      } catch {
+        // ignore malformed events
+      }
+    };
+    es.addEventListener("gone", (ev) => {
+      const e = ev as MessageEvent;
+      es.close();
+      let msg = "You no longer have access to this club";
+      try {
+        msg = JSON.parse(e.data).error || msg;
+      } catch {
+        // keep default
+      }
+      setData(null);
+      setError(msg);
+    });
+
+    return () => {
+      es.close();
+      if (poll) clearInterval(poll);
+    };
   }, [clubId]);
 
   if (loading) {
@@ -124,23 +169,26 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   }
 
   async function leave() {
+    setLeaveBusy(true);
     try {
       await api(`/api/clubs/${clubId}/leave`, { method: "POST" });
       window.location.hash = "#/clubs";
     } catch (e: any) {
       setError(e.message);
+      setLeaveBusy(false);
+      setShowMemberLeave(false);
     }
   }
 
   function requestLeave() {
-    // Members leave after a confirmation. The owner can't just leave — they
-    // have to hand the club over (transfer & leave) or delete it.
-    if (!isOwner) {
-      if (window.confirm(`Leave "${data!.club.name}"? You'll need a new invite to rejoin.`)) leave();
+    // The owner can't just leave — they have to hand the club over
+    // (transfer & leave) or delete it.
+    if (isOwner) {
+      setTransferTarget(null);
+      setShowLeave(true);
       return;
     }
-    setTransferTarget(null);
-    setShowLeave(true);
+    setShowMemberLeave(true);
   }
 
   async function transferAndLeave() {
@@ -158,13 +206,19 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
     }
   }
 
+  function requestDelete() {
+    setShowDelete(true);
+  }
+
   async function deleteClub() {
-    if (!window.confirm(`Delete "${data!.club.name}"? Nominations, votes, and picks are removed for everyone.`)) return;
+    setDeleteBusy(true);
     try {
       await api(`/api/clubs/${clubId}`, { method: "DELETE" });
       window.location.hash = "#/clubs";
     } catch (e: any) {
       setError(e.message);
+      setDeleteBusy(false);
+      setShowDelete(false);
     }
   }
 
@@ -264,7 +318,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
             Leave this club
           </button>
           {isOwner && (
-            <button className="link danger-link" onClick={deleteClub}>
+            <button className="link danger-link" onClick={requestDelete}>
               Delete this club
             </button>
           )}
@@ -299,16 +353,40 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         </section>
       )}
 
+      {showMemberLeave && (
+        <div className="modal-overlay" onClick={() => setShowMemberLeave(false)}>
+          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Leave this club</h2>
+              <button className="modal-close" onClick={() => setShowMemberLeave(false)}>
+                ×
+              </button>
+            </div>
+            <div className="club-modal-body">
+              <p className="muted">Leave "{data.club.name}"? You'll need a new invite to rejoin.</p>
+              <div className="form-actions">
+                <button className="btn-delete" disabled={leaveBusy} onClick={leave}>
+                  {leaveBusy ? "Leaving…" : "Leave club"}
+                </button>
+                <button className="btn-secondary" onClick={() => setShowMemberLeave(false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showLeave && (
         <div className="modal-overlay" onClick={() => setShowLeave(false)}>
-          <div className="modal club-leave-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Leave this club</h2>
               <button className="modal-close" onClick={() => setShowLeave(false)}>
                 ×
               </button>
             </div>
-            <div className="club-leave-body">
+            <div className="club-modal-body">
               <p className="muted">
                 You own this club. Transfer ownership to one of its members to leave — or delete the club for everyone.
               </p>
@@ -350,10 +428,36 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                   className="link danger-link"
                   onClick={() => {
                     setShowLeave(false);
-                    deleteClub();
+                    requestDelete();
                   }}
                 >
                   Delete this club instead
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDelete && (
+        <div className="modal-overlay" onClick={() => setShowDelete(false)}>
+          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Delete this club</h2>
+              <button className="modal-close" onClick={() => setShowDelete(false)}>
+                ×
+              </button>
+            </div>
+            <div className="club-modal-body">
+              <p className="muted">
+                Delete "{data.club.name}"? Nominations, votes, and picks are removed for every member. This can't be undone.
+              </p>
+              <div className="form-actions">
+                <button className="btn-delete" disabled={deleteBusy} onClick={deleteClub}>
+                  {deleteBusy ? "Deleting…" : "Delete club"}
+                </button>
+                <button className="btn-secondary" onClick={() => setShowDelete(false)}>
+                  Cancel
                 </button>
               </div>
             </div>

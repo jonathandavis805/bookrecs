@@ -1707,23 +1707,44 @@ button.secondary:hover:not(:disabled) {
   margin-left: auto;
 }
 
-/* ---------- Leave-club modal ---------- */
-.club-leave-modal {
+/* ---------- Club modals (leave / delete) ---------- */
+.club-modal {
   max-width: 420px;
 }
 
-.club-leave-body {
+.club-modal-body {
   padding: 20px 24px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.club-leave-body .form-actions {
+.club-modal-body .form-actions {
   margin-top: 4px;
 }
 
 .club-leave-footer {
   border-top: 1px solid var(--border);
   padding-top: 10px;
+}
+
+.btn-delete {
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  background: var(--danger);
+  color: white;
+}
+
+.btn-delete:hover:not(:disabled) {
+  background: #9c3636;
+  text-decoration: none;
+}
+
+.btn-delete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

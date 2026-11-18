@@ -693,6 +693,90 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     if (r.error) return json({ error: r.error }, 400);
     return json(r);
   }
+  const clubEvents = path.match(/^\/api\/clubs\/(\d+)\/events$/);
+  if (clubEvents && method === "GET") {
+    const targetClubId = Number(clubEvents[1]);
+    // Must be a member before we hold a stream open for them.
+    const initial = await core.getClub(db, user.id, targetClubId);
+    if (initial.error) {
+      return json({ error: initial.error }, initial.error === "Club not found" ? 404 : 403);
+    }
+    const initialVersion = await core.getClubVersion(db, targetClubId);
+
+    const encoder = new TextEncoder();
+    let alive = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const stream = new ReadableStream({
+      start(controller) {
+        let lastVersion = initialVersion;
+        let lastPing = Date.now();
+
+        const send = (chunk: string) => {
+          if (!alive) return;
+          try {
+            controller.enqueue(encoder.encode(chunk));
+          } catch {
+            alive = false;
+          }
+        };
+        const close = () => {
+          if (!alive) return;
+          alive = false;
+          if (timer) clearInterval(timer);
+          try { controller.close(); } catch { /* already closed */ }
+        };
+
+        const tick = async () => {
+          if (!alive || req.signal.aborted) return close();
+          try {
+            const version = await core.getClubVersion(db, targetClubId);
+            if (version === lastVersion) {
+              // Keepalive comment so proxies don't idle out the connection.
+              if (Date.now() - lastPing > 15000) {
+                send(": ping\n\n");
+                lastPing = Date.now();
+              }
+              return;
+            }
+            lastVersion = version;
+            const detail = await core.getClub(db, user.id, targetClubId);
+            if (detail.error) {
+              // Club deleted or membership revoked mid-stream.
+              send(`event: gone\ndata: ${JSON.stringify({ error: detail.error })}\n\n`);
+              return close();
+            }
+            lastPing = Date.now();
+            send(`data: ${JSON.stringify({ club: detail.club })}\n\n`);
+          } catch {
+            close();
+          }
+        };
+
+        // Tell the browser's EventSource to reconnect quickly after the
+        // server-side close below.
+        send("retry: 3000\n\n");
+        send(`data: ${JSON.stringify({ club: initial.club })}\n\n`);
+        timer = setInterval(tick, 1000);
+        // Workers budget subrequests per invocation, so don't hold one
+        // stream open forever — close well before exhausting them. The
+        // EventSource reconnects automatically (the client's poll
+        // fallback covers the brief gap).
+        setTimeout(() => close(), 35_000);
+      },
+      cancel() {
+        alive = false;
+        if (timer) clearInterval(timer);
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache, no-transform",
+      },
+    });
+  }
   const clubMatch = path.match(/^\/api\/clubs\/(\d+)$/);
   if (clubMatch && method === "GET") {
     const r = await core.getClub(db, user.id, Number(clubMatch[1]));

@@ -206,6 +206,7 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 | POST | `/api/clubs` | create `{name, description?, usernames?[]}` (invitees must be friends) |
 | GET  | `/api/clubs` | your clubs + pending invites |
 | GET  | `/api/clubs/:id` | club detail: members, nominations (with counts), your vote, current + past picks |
+| GET  | `/api/clubs/:id/events` | live club detail over Server-Sent Events (single `data:` per change; `gone` event on access loss) |
 | POST | `/api/clubs/:id/invite` | `{username}` invite a friend (members only) |
 | POST | `/api/clubs/:id/respond` | `{accept}` accept/decline your invite |
 | POST | `/api/clubs/:id/nominate` | `{ol_key?, book_id?, year?}` nominate a book (while voting is open) |
@@ -242,9 +243,10 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   book wins (ties go to the earliest nomination), and it becomes the club's
   current read with a one-tap "Start reading" into your personal list. The
   owner can then start a fresh vote; past picks are kept on the club page.
-  Open club pages poll every few seconds, so other members' votes and
-  nominations appear live. Owners who want out must transfer ownership to a
-  member or delete the club.
+  Open club pages live-update over Server-Sent Events (`/api/clubs/:id/events`
+  pushes the detail the moment a version check notices a change) with an
+  automatic 5s-polling fallback when the stream can't connect. Owners who
+  want out must transfer ownership to a member or delete the club.
 - Starting a book is one tap: every book on a friend's profile has a "📖 Reading"
   quick action (plus "♡ Wishlist"), and your own wishlist items have a
   "📖 Reading" button to start reading them.
