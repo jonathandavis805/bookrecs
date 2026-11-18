@@ -229,6 +229,11 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   `#/u/<username>` — so reloading keeps you on the same page.
 - Friend requests are mutual: a pending request from the other side is
   auto-accepted when you send yours.
+- Book search and display are English-first: author names are resolved to
+  their English form (Wikidata label when available), book searches rank
+  Latin-script titles ahead of foreign-script ones, and adding a work whose
+  title is in a foreign script (e.g. "Братья Карамазовы") stores the title of
+  its most common English edition instead ("The Brothers Karamazov").
 - **Book clubs** live under the Clubs tab. The owner creates a club and invites
   friends (anyone in the club can invite their own friends). While voting is
   open, members nominate books from Open Library and each cast one vote (you

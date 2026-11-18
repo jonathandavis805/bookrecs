@@ -100,25 +100,109 @@ async function englishAuthorName(key: string): Promise<string> {
   return result;
 }
 
+// ---------- English titles ----------
+
+// Works surface in Open Library under their original-language title (the
+// Russian "Братья Карамазовы", the German "Die Verwandlung", ...). Work
+// records don't link to Wikidata, so to display an English title we look at
+// the work's own English-language editions and use their most common title.
+const englishTitleCache = new Map<string, string>();
+
+// Fraction of words that start with a capital letter — used to prefer
+// "The Brothers Karamazov" over the equally-common "The brothers Karamazov".
+function titleCaseScore(s: string): number {
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 0;
+  const capped = words.filter((w) => /^[A-Z]/.test(w)).length;
+  return capped / words.length;
+}
+
+async function englishTitle(key: string): Promise<string> {
+  const cached = englishTitleCache.get(key);
+  if (cached !== undefined) return cached;
+
+  let result = "";
+  try {
+    const d = await getJson(`${BASE}${key}/editions.json?limit=500`);
+    const entries: any[] = Array.isArray(d?.entries) ? d.entries : [];
+    let best: { title: string; n: number } | null = null;
+    const counts = new Map<string, { title: string; n: number }>();
+
+    for (const e of entries) {
+      const title: unknown = e?.title;
+      if (typeof title !== "string" || !title.trim() || !isLatin(title)) continue;
+      const langs: any[] = Array.isArray(e?.languages) ? e.languages : [];
+      if (!langs.some((l) => typeof l?.key === "string" && l.key.endsWith("/eng"))) continue;
+      // "The Brothers Karamazov" / "the brothers karamazov" / "Brothers
+      // Karamazov" are all the same title to a reader — count them together.
+      const norm = title.toLowerCase().replace(/^(the|a|an)\s+/, "").replace(/\s+/g, " ").trim();
+      if (!norm) continue;
+      const cur = counts.get(norm) ?? { title, n: 0 };
+      cur.n += 1;
+      counts.set(norm, cur);
+    }
+
+    for (const c of counts.values()) {
+      if (
+        !best ||
+        c.n > best.n ||
+        (c.n === best.n &&
+          (titleCaseScore(c.title) > titleCaseScore(best.title) ||
+            (titleCaseScore(c.title) === titleCaseScore(best.title) && c.title.length < best.title.length)))
+      ) {
+        best = c;
+      }
+    }
+    result = best?.title ?? "";
+  } catch {
+    // could not resolve; leave empty
+  }
+
+  englishTitleCache.set(key, result);
+  return result;
+}
+
 export async function searchBooks(query: string): Promise<OLHit[]> {
   const url =
     `${BASE}/search.json?q=${encodeURIComponent(query)}` +
     `&fields=key,title,author_name,cover_i,first_publish_year&limit=20`;
   const data = await getJson(url);
   const docs: any[] = data?.docs ?? [];
-  return docs.map((d) => ({
+  let hits = docs.map((d) => ({
     key: d.key,
     title: d.title ?? "Unknown title",
     author: Array.isArray(d.author_name) ? d.author_name[0] : d.author_name ?? "",
     coverUrl: d.cover_i ? coverUrl(d.cover_i) : undefined,
     year: d.first_publish_year ?? undefined,
   }));
+
+  // Open Library ranks by relevance across all languages, so a search for
+  // "Brother Karamazov" puts the Russian "Братья Карамазовы" first. For a
+  // Latin-script query, keep relevance order but put Latin-script titles
+  // ahead of foreign-script ones.
+  if (isLatin(query)) {
+    const latin = hits.filter((h) => isLatin(h.title));
+    const foreign = hits.filter((h) => !isLatin(h.title));
+    hits = [...latin, ...foreign];
+  }
+
+  return hits;
 }
 
 export async function fetchWork(key: string): Promise<OLWork | null> {
   try {
     const d = await getJson(`${BASE}${key}.json`);
     if (!d || !d.title) return null;
+
+    // A foreign-script title ("Братья Карамазовы") reads awkwardly next to
+    // the English author name we resolve below — display the work's English
+    // edition title instead when one exists.
+    let title: string = d.title;
+    if (!isLatin(title)) {
+      const en = await englishTitle(key);
+      if (en) title = en;
+    }
+
     const authorKeys: string[] = (d.authors ?? [])
       .map((a: any) => a?.author?.key ?? a?.key)
       .filter((k: unknown): k is string => typeof k === "string");
@@ -142,7 +226,7 @@ export async function fetchWork(key: string): Promise<OLWork | null> {
     
     return {
       key,
-      title: d.title,
+      title,
       author: names.join(", "),
       coverUrl: typeof coverId === "number" ? coverUrl(coverId) : undefined,
       year: yearFrom(d.first_publish_date),
