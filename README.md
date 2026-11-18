@@ -215,6 +215,7 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 | POST | `/api/clubs/:id/reopen-vote` | owner: start a new nomination/vote cycle |
 | DELETE | `/api/clubs/:id/members/:userId` | owner: remove a member / cancel invite |
 | POST | `/api/clubs/:id/leave` | member: leave the club |
+| POST | `/api/clubs/:id/transfer` | owner: `{userId}` transfer ownership to a member and leave |
 | DELETE | `/api/clubs/:id` | owner: delete the club |
 
 ## Notes
@@ -241,6 +242,9 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   book wins (ties go to the earliest nomination), and it becomes the club's
   current read with a one-tap "Start reading" into your personal list. The
   owner can then start a fresh vote; past picks are kept on the club page.
+  Open club pages poll every few seconds, so other members' votes and
+  nominations appear live. Owners who want out must transfer ownership to a
+  member or delete the club.
 - Starting a book is one tap: every book on a friend's profile has a "📖 Reading"
   quick action (plus "♡ Wishlist"), and your own wishlist items have a
   "📖 Reading" button to start reading them.

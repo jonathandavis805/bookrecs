@@ -1708,7 +1708,9 @@ export async function leaveClub(db: D1Database, userId: number, clubId: number):
   if (!club) return { ok: false, error: "Club not found" };
   const membership = await getClubMembership(db, clubId, userId);
   if (!membership) return { ok: false, error: "You are not a member of this club" };
-  if (membership.role === "owner") return { ok: false, error: "Owners can't leave their club — delete it instead" };
+  if (membership.role === "owner") {
+    return { ok: false, error: "Owners can't leave directly — transfer ownership or delete the club" };
+  }
 
   await execute(db, "DELETE FROM club_members WHERE club_id = ? AND user_id = ?", clubId, userId);
   await execute(
@@ -1726,5 +1728,43 @@ export async function deleteClub(db: D1Database, userId: number, clubId: number)
   if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can delete the club" };
 
   await execute(db, "DELETE FROM clubs WHERE id = ?", clubId);
+  return { ok: true };
+}
+
+export async function transferClubOwnership(
+  db: D1Database,
+  userId: number,
+  clubId: number,
+  targetUserId: number
+): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can transfer ownership" };
+  if (targetUserId === userId) return { ok: false, error: "You already own this club" };
+
+  const target = await getClubMembership(db, clubId, targetUserId);
+  if (!target || target.status !== "accepted") return { ok: false, error: "Pick an accepted member of this club" };
+  if (target.role === "owner") return { ok: false, error: "That member already owns this club" };
+
+  // The successor takes over; the former owner leaves the club (their vote
+  // goes with them, same as a regular leave).
+  await execute(db, "UPDATE club_members SET role = 'owner' WHERE club_id = ? AND user_id = ?", clubId, targetUserId);
+  await execute(db, "DELETE FROM club_members WHERE club_id = ? AND user_id = ?", clubId, userId);
+  await execute(
+    db,
+    "DELETE FROM club_votes WHERE user_id = ? AND nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)",
+    userId, clubId
+  );
+
+  const oldOwner = await getUserById(db, userId);
+  const newOwner = await getUserById(db, targetUserId);
+  if (newOwner) {
+    await createNotification(
+      db, targetUserId, "club_owner",
+      `@${oldOwner?.username ?? "Someone"} transferred ownership of "${club.name}" to you`,
+      { clubId, name: club.name, userId, username: oldOwner?.username }
+    );
+  }
   return { ok: true };
 }

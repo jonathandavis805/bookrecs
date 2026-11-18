@@ -685,6 +685,14 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     if (r.error) return json({ error: r.error }, 400);
     return json({ ok: true, ...(await core.listClubsForUser(db, user.id)) });
   }
+  const clubTransfer = path.match(/^\/api\/clubs\/(\d+)\/transfer$/);
+  if (clubTransfer && method === "POST") {
+    const { userId: targetUserId } = await readBody(req);
+    if (targetUserId == null) return json({ error: "userId is required" }, 400);
+    const r = await core.transferClubOwnership(db, user.id, Number(clubTransfer[1]), Number(targetUserId));
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
   const clubMatch = path.match(/^\/api\/clubs\/(\d+)$/);
   if (clubMatch && method === "GET") {
     const r = await core.getClub(db, user.id, Number(clubMatch[1]));

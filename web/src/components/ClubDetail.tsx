@@ -29,6 +29,9 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [showLeave, setShowLeave] = useState(false);
+  const [transferTarget, setTransferTarget] = useState<number | null>(null);
+  const [transferBusy, setTransferBusy] = useState(false);
 
   async function load(background = false) {
     try {
@@ -79,6 +82,9 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   }
 
   const isOwner = data.myRole === "owner";
+  const transferCandidates = data.members.filter(
+    (m) => m.status === "accepted" && m.role !== "owner"
+  );
 
   async function act(fn: () => Promise<any>, message?: string) {
     setError("");
@@ -123,6 +129,32 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       window.location.hash = "#/clubs";
     } catch (e: any) {
       setError(e.message);
+    }
+  }
+
+  function requestLeave() {
+    // Members leave after a confirmation. The owner can't just leave — they
+    // have to hand the club over (transfer & leave) or delete it.
+    if (!isOwner) {
+      if (window.confirm(`Leave "${data!.club.name}"? You'll need a new invite to rejoin.`)) leave();
+      return;
+    }
+    setTransferTarget(null);
+    setShowLeave(true);
+  }
+
+  async function transferAndLeave() {
+    if (transferTarget == null) return;
+    setTransferBusy(true);
+    try {
+      await api(`/api/clubs/${clubId}/transfer`, {
+        method: "POST",
+        body: JSON.stringify({ userId: transferTarget }),
+      });
+      window.location.hash = "#/clubs";
+    } catch (e: any) {
+      setError(e.message);
+      setTransferBusy(false);
     }
   }
 
@@ -228,13 +260,12 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
           onError={setError}
         />
         <div className="club-footer-actions">
-          {isOwner ? (
+          <button className="link danger-link" onClick={requestLeave}>
+            Leave this club
+          </button>
+          {isOwner && (
             <button className="link danger-link" onClick={deleteClub}>
               Delete this club
-            </button>
-          ) : (
-            <button className="link danger-link" onClick={leave}>
-              Leave this club
             </button>
           )}
         </div>
@@ -266,6 +297,68 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
             ))}
           </ul>
         </section>
+      )}
+
+      {showLeave && (
+        <div className="modal-overlay" onClick={() => setShowLeave(false)}>
+          <div className="modal club-leave-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Leave this club</h2>
+              <button className="modal-close" onClick={() => setShowLeave(false)}>
+                ×
+              </button>
+            </div>
+            <div className="club-leave-body">
+              <p className="muted">
+                You own this club. Transfer ownership to one of its members to leave — or delete the club for everyone.
+              </p>
+              {transferCandidates.length > 0 ? (
+                <>
+                  <span className="small-label">Transfer ownership to</span>
+                  <div className="club-friend-picker">
+                    {transferCandidates.map((m) => (
+                      <button
+                        type="button"
+                        key={m.user_id}
+                        className={"club-friend-chip" + (transferTarget === m.user_id ? " picked" : "")}
+                        onClick={() => setTransferTarget(m.user_id)}
+                      >
+                        @{m.username}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="form-actions">
+                    <button
+                      className="btn-primary"
+                      disabled={transferTarget == null || transferBusy}
+                      onClick={transferAndLeave}
+                    >
+                      {transferBusy ? "Transferring…" : "Transfer ownership & leave"}
+                    </button>
+                    <button className="btn-secondary" onClick={() => setShowLeave(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="empty">
+                  You're the only member. Invite someone first — or delete the club below.
+                </div>
+              )}
+              <div className="club-leave-footer">
+                <button
+                  className="link danger-link"
+                  onClick={() => {
+                    setShowLeave(false);
+                    deleteClub();
+                  }}
+                >
+                  Delete this club instead
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

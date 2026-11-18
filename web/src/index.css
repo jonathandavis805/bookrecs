@@ -1651,6 +1651,9 @@ button.secondary:hover:not(:disabled) {
 
 .club-footer-actions {
   margin-top: 14px;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
 }
 
 .danger-link {
@@ -1702,4 +1705,25 @@ button.secondary:hover:not(:disabled) {
    the description text. */
 .page-head .btn-primary {
   margin-left: auto;
+}
+
+/* ---------- Leave-club modal ---------- */
+.club-leave-modal {
+  max-width: 420px;
+}
+
+.club-leave-body {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.club-leave-body .form-actions {
+  margin-top: 4px;
+}
+
+.club-leave-footer {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
 }
