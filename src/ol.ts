@@ -165,10 +165,10 @@ async function englishTitle(key: string): Promise<string> {
 export async function searchBooks(query: string): Promise<OLHit[]> {
   const url =
     `${BASE}/search.json?q=${encodeURIComponent(query)}` +
-    `&fields=key,title,author_name,cover_i,first_publish_year&limit=20`;
+    `&fields=key,title,author_name,author_key,cover_i,first_publish_year&limit=20`;
   const data = await getJson(url);
   const docs: any[] = data?.docs ?? [];
-  let hits = docs.map((d) => ({
+  const hits = docs.map((d) => ({
     key: d.key,
     title: d.title ?? "Unknown title",
     author: Array.isArray(d.author_name) ? d.author_name[0] : d.author_name ?? "",
@@ -176,17 +176,44 @@ export async function searchBooks(query: string): Promise<OLHit[]> {
     year: d.first_publish_year ?? undefined,
   }));
 
+  // Open Library's search index shows the author as named on the original
+  // work ("Фёдор Михайлович Достоевский"), which reads as noise next to an
+  // English title. author_name and author_key are parallel arrays, so
+  // resolve non-Latin author names to their English form — same as when a
+  // book is added. Results usually share a handful of authors, and
+  // englishAuthorName caches, so this is a few requests at most.
+  const authorKeyOf = (d: any): string | undefined =>
+    Array.isArray(d.author_key) ? d.author_key[0] : typeof d.author_key === "string" ? d.author_key : undefined;
+  const foreignKeys = new Set<string>();
+  docs.forEach((d, i) => {
+    const key = authorKeyOf(d);
+    if (hits[i].author && !isLatin(hits[i].author) && key) foreignKeys.add(key);
+  });
+  if (foreignKeys.size > 0) {
+    await Promise.all(
+      [...foreignKeys].slice(0, 10).map(async (k) => {
+        const en = await englishAuthorName(`/authors/${k}`);
+        if (!en || !isLatin(en)) return;
+        docs.forEach((d, i) => {
+          if (authorKeyOf(d) === k) hits[i].author = en;
+        });
+      })
+    );
+  }
+
+  let ranked: OLHit[] = hits;
+
   // Open Library ranks by relevance across all languages, so a search for
   // "Brother Karamazov" puts the Russian "Братья Карамазовы" first. For a
   // Latin-script query, keep relevance order but put Latin-script titles
   // ahead of foreign-script ones.
   if (isLatin(query)) {
-    const latin = hits.filter((h) => isLatin(h.title));
-    const foreign = hits.filter((h) => !isLatin(h.title));
-    hits = [...latin, ...foreign];
+    const latin = ranked.filter((h) => isLatin(h.title));
+    const foreign = ranked.filter((h) => !isLatin(h.title));
+    ranked = [...latin, ...foreign];
   }
 
-  return hits;
+  return ranked;
 }
 
 export async function fetchWork(key: string): Promise<OLWork | null> {
