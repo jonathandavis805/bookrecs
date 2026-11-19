@@ -231,7 +231,8 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   default private — flip the Public switch on a book to share it. Your
   **currently reading** list has no privacy flag and is always visible to friends.
 - Tabs are real pages with hash URLs — `#/books`, `#/add`, `#/friends`,
-  `#/u/<username>` — so reloading keeps you on the same page.
+  `#/account` (My Account, via the @username link), `#/u/<username>` — so
+  reloading keeps you on the same page.
 - Friend requests are mutual: a pending request from the other side is
   auto-accepted when you send yours.
 - Book search and display are English-first: author names are resolved to

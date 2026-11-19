@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, User, ReadingItem } from "../api";
+import { api, ReadingItem } from "../api";
 
 interface Friend {
   user_id: number;
@@ -17,14 +17,12 @@ interface SearchableUser {
 }
 
 interface FriendsProps {
-  user: User;
   refreshKey: number;
   onFriendRequestsChanged: () => void;
   onOpenProfile: (username: string) => void;
-  onChangePassword: () => void;
 }
 
-export default function Friends({ user, refreshKey, onFriendRequestsChanged, onOpenProfile, onChangePassword }: FriendsProps) {
+export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenProfile }: FriendsProps) {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [incoming, setIncoming] = useState<Request[]>([]);
   const [outgoing, setOutgoing] = useState<Request[]>([]);
@@ -33,20 +31,17 @@ export default function Friends({ user, refreshKey, onFriendRequestsChanged, onO
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
-  const [discoverable, setDiscoverable] = useState(Boolean(user.discoverable ?? true));
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function load() {
     try {
-      const [f, r, privacy] = await Promise.all([
+      const [f, r] = await Promise.all([
         api<{ friends: Friend[] }>("/api/friends"),
         api<{ incoming: Request[]; outgoing: Request[] }>("/api/friends/requests"),
-        api<{ discoverable: boolean }>("/api/me/privacy"),
       ]);
       setFriends(f.friends);
       setIncoming(r.incoming);
       setOutgoing(r.outgoing);
-      setDiscoverable(privacy.discoverable);
     } catch (e: any) {
       setError(e.message);
     }
@@ -75,21 +70,6 @@ export default function Friends({ user, refreshKey, onFriendRequestsChanged, onO
       if (searchTimer.current) clearTimeout(searchTimer.current);
     };
   }, [addInput]);
-
-  async function toggleDiscoverable() {
-    const next = !discoverable;
-    setDiscoverable(next);
-    try {
-      await api("/api/me/privacy", {
-        method: "POST",
-        body: JSON.stringify({ discoverable: next }),
-      });
-      setInfo(next ? "Your profile is now visible in Discover." : "Your profile is now hidden from Discover.");
-    } catch (e: any) {
-      setDiscoverable(!next);
-      setError(e.message);
-    }
-  }
 
   async function addFriend(e: React.FormEvent) {
     e.preventDefault();
@@ -151,50 +131,13 @@ export default function Friends({ user, refreshKey, onFriendRequestsChanged, onO
   return (
     <div className="page">
       <div className="page-head">
-        <h2>My Account</h2>
+        <h2>Friends</h2>
       </div>
 
       {error && <div className="error">{error}</div>}
       {info && <div className="info">{info}</div>}
 
-      <section className="account-info">
-        <h3>Account Information</h3>
-        <div className="account-details">
-          <div className="detail-row">
-            <span className="detail-label">Username</span>
-            <span className="detail-value">@{user.username}</span>
-          </div>
-          <div className="detail-row">
-            <span className="detail-label">Email</span>
-            <span className="detail-value">{user.email}</span>
-          </div>
-          <div className="detail-row">
-            <span className="detail-label">Private mode</span>
-            <div className="detail-value" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={!discoverable}
-                className={"switch sm" + (!discoverable ? " on" : "")}
-                onClick={toggleDiscoverable}
-              >
-                <span className="knob" />
-              </button>
-              <span className="muted" style={{ fontSize: "0.85rem" }}>
-                {discoverable ? "Off — others can find you" : "On — hidden from discovery"}
-              </span>
-            </div>
-          </div>
-          <div className="detail-row">
-            <button className="btn-link" onClick={() => onChangePassword()}>
-              Change Password
-            </button>
-          </div>
-        </div>
-      </section>
-
       <section>
-        <h3>Friends</h3>
         <p className="muted">Search by name, email, or username to find people and add them as friends.</p>
 
         <form className="search-bar" onSubmit={addFriend}>
