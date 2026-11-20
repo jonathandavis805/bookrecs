@@ -339,7 +339,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                       : "Most votes wins"
                   }
                 >
-                  {data.runoff ? "Close runoff &amp; pick winner" : "Close voting &amp; pick winner"}
+                  {data.runoff ? "Close runoff & pick winner" : "Close voting & pick winner"}
                 </button>
               </div>
             )}
@@ -663,7 +663,7 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
       setSearching(true);
       setError("");
       try {
-        const d = await api<{ results: SearchHit[] }>("/api/books/search?q=" + encodeURIComponent(q.trim()));
+        const d = await api<{ results: SearchHit[] }>("/api/books/search?mine=1&q=" + encodeURIComponent(q.trim()));
         setHits(d.results);
       } catch (e: any) {
         setError(e.message);
@@ -680,7 +680,9 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
     try {
       await api(`/api/clubs/${clubId}/nominate`, {
         method: "POST",
-        body: JSON.stringify({ ol_key: hit.key, year: hit.year }),
+        body: JSON.stringify(
+          hit.bookId != null ? { book_id: hit.bookId } : { ol_key: hit.key, year: hit.year }
+        ),
       });
       setStatus((s) => ({ ...s, [hit.key]: "Nominated" }));
       setQ("");
@@ -695,7 +697,7 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
   return (
     <div className="club-nominate">
       <div className="search-bar">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a book to nominate…" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your lists or Open Library…" />
         {searching && <span className="searching-indicator">Searching…</span>}
       </div>
       {error && <div className="error">{error}</div>}
@@ -711,7 +713,14 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
                   <span className="cover no-cover" />
                 )}
                 <div className="info">
-                  <div className="title">{h.title}</div>
+                  <div className="title">
+                    {h.title}
+                    {h.mine && (
+                      <span className="badge">
+                        {h.mine === "reading" ? "Reading" : h.mine === "wishlist" ? "Wishlist" : "Read"}
+                      </span>
+                    )}
+                  </div>
                   <div className="author">
                     {h.author || "Unknown author"}
                     {h.year ? ` · ${h.year}` : ""}

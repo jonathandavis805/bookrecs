@@ -104,6 +104,58 @@ export async function getBookById(db: D1Database, id: number): Promise<BookRow |
   return await queryOne<BookRow>(db, "SELECT * FROM books WHERE id = ?", id);
 }
 
+export interface MyBookHit {
+  bookId: number;
+  key: string;
+  title: string;
+  author: string;
+  coverUrl?: string;
+  year?: number;
+  list: "reading" | "wishlist" | "read";
+}
+
+// Books from the user's own lists (reading, wishlist, read) whose title or
+// author matches the query. Club nomination search uses this so members can
+// nominate straight from their shelves. A book on several lists appears once,
+// preferring reading over wishlist over read.
+export async function searchMyBooks(db: D1Database, userId: number, q: string): Promise<MyBookHit[]> {
+  const like = `%${q}%`;
+  const rows = await queryAll<{
+    id: number; ol_key: string; title: string; author: string | null;
+    cover_url: string | null; first_publish_year: number | null; list: string;
+  }>(
+    db,
+    `SELECT b.id, b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, x.list
+     FROM books b
+     JOIN (
+       SELECT book_id, 'reading' AS list, 0 AS ord FROM reading WHERE user_id = ?
+       UNION ALL
+       SELECT book_id, 'wishlist' AS list, 1 AS ord FROM wishlist WHERE user_id = ?
+       UNION ALL
+       SELECT book_id, 'read' AS list, 2 AS ord FROM reads WHERE user_id = ?
+     ) x ON x.book_id = b.id
+     WHERE b.title LIKE ? OR b.author LIKE ?
+     ORDER BY x.ord ASC`,
+    userId, userId, userId, like, like
+  );
+  const seen = new Set<number>();
+  const hits: MyBookHit[] = [];
+  for (const r of rows) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    hits.push({
+      bookId: r.id,
+      key: r.ol_key,
+      title: r.title,
+      author: r.author ?? "",
+      coverUrl: r.cover_url ?? undefined,
+      year: r.first_publish_year ?? undefined,
+      list: r.list as MyBookHit["list"],
+    });
+  }
+  return hits;
+}
+
 export async function setBookCover(db: D1Database, id: number, coverUrl: string): Promise<BookRow | null> {
   await execute(db, "UPDATE books SET cover_url = ? WHERE id = ?", coverUrl, id);
   return await getBookById(db, id);

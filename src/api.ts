@@ -286,6 +286,26 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (path === "/api/books/search" && method === "GET") {
     const q = (url.searchParams.get("q") ?? "").trim();
     if (!q) return json({ results: [] });
+    // mine=1 (club nomination search) also surfaces the user's own books
+    // from their reading/wishlist/read lists, ahead of Open Library hits.
+    const includeMine = url.searchParams.get("mine") === "1";
+    const mine = includeMine ? await core.searchMyBooks(db, user.id, q) : [];
+    const mineKeys = new Set(mine.map((m) => m.key));
+    // Manual books have synthetic keys, so also dedupe Open Library hits by
+    // normalized title to avoid showing the same book twice.
+    const normTitle = (t: string) =>
+      t.toLowerCase().replace(/^(the|a|an)\s+/, "").replace(/\s+/g, " ").trim();
+    const mineTitles = new Set(mine.map((m) => normTitle(m.title)));
+    const mineResults = mine.map((m) => ({
+      key: m.key,
+      title: m.title,
+      author: m.author,
+      coverUrl: m.coverUrl,
+      year: m.year,
+      bookId: m.bookId,
+      added: true,
+      mine: m.list,
+    }));
     try {
       const results = await searchBooks(q);
       const keys = results.map(r => r.key);
@@ -298,9 +318,13 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
       const rank = (r: { key: string; title: string }) =>
         (isLatin(q) && !isLatin(r.title) ? 2 : 0) + (existingKeys.has(r.key) ? 0 : 1);
       const sorted = results.sort((a, b) => rank(a) - rank(b));
-      const resultsWithFlag = sorted.map(r => ({ ...r, added: existingKeys.has(r.key) }));
-      return json({ results: resultsWithFlag });
+      const resultsWithFlag = sorted
+        .filter((r) => !mineKeys.has(r.key) && !mineTitles.has(normTitle(r.title)))
+        .map((r) => ({ ...r, added: existingKeys.has(r.key) }));
+      return json({ results: [...mineResults, ...resultsWithFlag] });
     } catch (e) {
+      // Open Library is down, but the user's own matches are still useful.
+      if (mineResults.length > 0) return json({ results: mineResults });
       return json({ error: "Open Library is unavailable right now", detail: String(e) }, 502);
     }
   }

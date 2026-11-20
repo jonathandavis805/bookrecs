@@ -32,6 +32,8 @@ export interface SearchHit {
   coverUrl?: string;
   year?: number;
   added?: boolean;
+  bookId?: number;
+  mine?: "read" | "reading" | "wishlist";
 }
 
 export interface WishlistItem {
