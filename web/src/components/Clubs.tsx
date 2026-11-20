@@ -113,10 +113,15 @@ export default function Clubs({
                 {c.description && <div className="author">{c.description}</div>}
                 <div className="author">
                   {c.memberCount} member{c.memberCount === 1 ? "" : "s"}
+                  {c.invitedCount > 0 && ` · ${c.invitedCount} invited`}
                   {c.voting_open === 1
                     ? c.nominationCount > 0
                       ? ` · Voting open · ${c.nominationCount} nominated`
                       : " · Voting open · no nominations yet"
+                    : c.nominations_open === 1
+                    ? c.nominationCount > 0
+                      ? ` · Nominating · ${c.nominationCount} nominated`
+                      : " · Nominating · no nominations yet"
                     : ""}
                 </div>
                 {c.currentPick && (

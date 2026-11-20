@@ -708,9 +708,21 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const detail = await core.getClub(db, user.id, Number(clubRunoff[1]));
     return json(detail.error ? { ok: true } : { club: detail.club });
   }
-  const clubReopenVote = path.match(/^\/api\/clubs\/(\d+)\/reopen-vote$/);
-  if (clubReopenVote && method === "POST") {
-    const r = await core.reopenVote(db, user.id, Number(clubReopenVote[1]));
+  const clubOpenNominations = path.match(/^\/api\/clubs\/(\d+)\/open-nominations$/);
+  if (clubOpenNominations && method === "POST") {
+    const r = await core.openNominations(db, user.id, Number(clubOpenNominations[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubStartVoting = path.match(/^\/api\/clubs\/(\d+)\/start-voting$/);
+  if (clubStartVoting && method === "POST") {
+    const r = await core.startVoting(db, user.id, Number(clubStartVoting[1]));
+    if (r.error) return json({ error: r.error }, 400);
+    return json(r);
+  }
+  const clubBackToNominations = path.match(/^\/api\/clubs\/(\d+)\/back-to-nominations$/);
+  if (clubBackToNominations && method === "POST") {
+    const r = await core.backToNominations(db, user.id, Number(clubBackToNominations[1]));
     if (r.error) return json({ error: r.error }, 400);
     return json(r);
   }

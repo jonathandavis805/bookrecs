@@ -209,14 +209,16 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 | GET  | `/api/clubs/:id/events` | live club detail over Server-Sent Events (single `data:` per change; `gone` event on access loss) |
 | POST | `/api/clubs/:id/invite` | `{username}` invite a friend (members only) |
 | POST | `/api/clubs/:id/respond` | `{accept}` accept/decline your invite |
-| POST | `/api/clubs/:id/nominate` | `{ol_key?, book_id?, year?}` nominate a book (while voting is open) |
-| POST | `/api/clubs/:id/vote` | `{nominationId}` cast/move your one vote |
+| POST | `/api/clubs/:id/nominate` | `{ol_key?, book_id?, year?}` nominate a book (nomination stage only) |
+| POST | `/api/clubs/:id/vote` | `{nominationId}` cast/move your one vote (voting stage only) |
 | POST | `/api/clubs/:id/veto` | `{nominationId}` strike a nomination (one veto per member per vote) |
 | DELETE | `/api/clubs/:id/nominations/:nominationId` | owner: remove a nomination (accidental adds) |
 | DELETE | `/api/clubs/:id/vote` | remove your vote |
+| POST | `/api/clubs/:id/open-nominations` | owner: start a new cycle in the nomination stage |
+| POST | `/api/clubs/:id/start-voting` | owner: lock nominations and open the vote |
+| POST | `/api/clubs/:id/back-to-nominations` | owner: clear all votes and return to the nomination stage |
 | POST | `/api/clubs/:id/close-vote` | owner: a simple majority wins (otherwise a runoff is offered) |
 | POST | `/api/clubs/:id/runoff` | owner: revote among the top two vote-getters (ties included) |
-| POST | `/api/clubs/:id/reopen-vote` | owner: start a new nomination/vote cycle |
 | DELETE | `/api/clubs/:id/members/:userId` | owner: remove a member / cancel invite |
 | POST | `/api/clubs/:id/leave` | member: leave the club |
 | POST | `/api/clubs/:id/transfer` | owner: `{userId}` transfer ownership to a member and leave |
@@ -241,12 +243,15 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   title is in a foreign script (e.g. "Братья Карамазовы") stores the title of
   its most common English edition instead ("The Brothers Karamazov").
 - **Book clubs** live under the Clubs tab. The owner creates a club and invites
-  friends (anyone in the club can invite their own friends). While voting is
-  open, members nominate books from Open Library and each cast one vote (you
-  can move or remove your vote). The owner closes the vote; a book needs a
+  friends (anyone in the club can invite their own friends). Each cycle has two
+  owner-controlled stages: a **nomination stage** (members suggest books from
+  their own lists or Open Library) and a **voting stage** (nominations lock,
+  each member casts one vote — you can move or remove it). The owner can reset
+  the vote and return to nominations at any time, clearing all cast votes.
+  The owner closes the vote; a book needs a
   simple majority (more than half the votes cast) to win, and it becomes the club's
   current read with a one-tap "Start reading" into your personal list. The
-  owner can then start a fresh vote; past picks are kept on the club page.
+  owner can then start a new cycle; past picks are kept on the club page.
   Open club pages live-update over Server-Sent Events (`/api/clubs/:id/events`
   pushes the detail within ~half a second of a change) with an automatic
   5s-polling fallback when the stream can't connect. Nominations are ordered
