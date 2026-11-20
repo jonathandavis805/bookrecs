@@ -117,6 +117,10 @@ export default function Clubs({
                     ? c.nominationCount > 0
                       ? ` · Voting open · ${c.nominationCount} nominated`
                       : " · Voting open · no nominations yet"
+                    : c.nominations_open === 1
+                    ? c.nominationCount > 0
+                      ? ` · Nominating · ${c.nominationCount} nominated`
+                      : " · Nominating · no nominations yet"
                     : ""}
                 </div>
                 {c.currentPick && (

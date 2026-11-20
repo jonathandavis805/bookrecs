@@ -57,6 +57,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const [removeBusy, setRemoveBusy] = useState(false);
   const [showRunoff, setShowRunoff] = useState(false);
   const [runoffBusy, setRunoffBusy] = useState(false);
+  const [showResetVote, setShowResetVote] = useState(false);
 
   async function load(background = false) {
     try {
@@ -248,8 +249,17 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
     }
   }
 
-  async function reopenVote() {
-    await act(() => api(`/api/clubs/${clubId}/reopen-vote`, { method: "POST" }), "Voting reopened for the next pick.");
+  async function openNominations() {
+    await act(() => api(`/api/clubs/${clubId}/open-nominations`, { method: "POST" }), "Nominations are open for the next pick.");
+  }
+
+  async function startVoting() {
+    await act(() => api(`/api/clubs/${clubId}/start-voting`, { method: "POST" }), "Voting is open — nominations are locked.");
+  }
+
+  async function backToNominations() {
+    setShowResetVote(false);
+    await act(() => api(`/api/clubs/${clubId}/back-to-nominations`, { method: "POST" }), "Voting reset — back to nominations.");
   }
 
   async function removeMember(userId: number) {
@@ -325,19 +335,67 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
 
       <section className="club-section">
         <h3 className="section-title">
-          {data.votingOpen ? "Vote for the next book" : "Voting"}
+          {data.nominationsOpen ? "Nominate the next book" : data.votingOpen ? "Vote for the next book" : "Voting"}
         </h3>
-        {!data.votingOpen && (
+        {!data.votingOpen && !data.nominationsOpen && (
           <div className="club-closed-row">
             <span className="muted">
               Voting is closed. The winner is shown above as the current read.
             </span>
             {isOwner && (
-              <button className="btn-primary" onClick={reopenVote}>
-                Start a new vote
+              <button className="btn-primary" onClick={openNominations}>
+                Start nominations
               </button>
             )}
           </div>
+        )}
+
+        {data.nominationsOpen && (
+          <>
+            {isOwner && (
+              <div className="club-owner-actions">
+                <button
+                  className="btn-primary"
+                  onClick={startVoting}
+                  disabled={activeNominations.length === 0}
+                  title={
+                    activeNominations.length === 0
+                      ? "Nominate at least one book first"
+                      : "Lock nominations and open the vote"
+                  }
+                >
+                  Start voting
+                </button>
+              </div>
+            )}
+
+            <NominatePane clubId={clubId} onNominated={load} />
+
+            {data.nominations.length === 0 ? (
+              <div className="empty">No nominations yet — suggest the first book.</div>
+            ) : (
+              <motion.ul className="plain-list" layout>
+                {sortedNominations.map((n) => (
+                  <NominationRow
+                    key={n.id}
+                    n={n}
+                    voting={false}
+                    myVote={false}
+                    canVeto={false}
+                    isOwner={isOwner}
+                    onVote={() => {}}
+                    onUnvote={() => {}}
+                    onVeto={() => {}}
+                    onRemove={() => setRemoveTarget(n)}
+                  />
+                ))}
+              </motion.ul>
+            )}
+
+            <div className="muted club-myvote-note">
+              Nominations are open — the owner starts the vote once the field is set.
+            </div>
+          </>
         )}
 
         {data.votingOpen && (
@@ -362,6 +420,13 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                 >
                   {data.runoff ? "Close runoff & pick winner" : "Close voting & pick winner"}
                 </button>
+                <button
+                  className="secondary"
+                  onClick={() => setShowResetVote(true)}
+                  title="Clear all votes and reopen nominations"
+                >
+                  Back to nominations
+                </button>
               </div>
             )}
 
@@ -377,11 +442,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
               </div>
             )}
 
-            {!data.runoff ? (
-              <NominatePane clubId={clubId} onNominated={load} />
-            ) : (
-              <div className="muted club-myvote-note">Nominations are paused until the runoff ends.</div>
-            )}
+            <div className="muted club-myvote-note">Nominations are closed while voting is open.</div>
 
             {data.nominations.length === 0 ? (
               <div className="empty">No nominations yet — suggest the first book.</div>
@@ -391,6 +452,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                   <NominationRow
                     key={n.id}
                     n={n}
+                    voting
                     myVote={data.myVote === n.id}
                     canVeto={!data.myVetoUsed && n.vetoed_by == null}
                     isOwner={isOwner}
@@ -587,6 +649,34 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         </div>
       )}
 
+      {showResetVote && (
+        <div className="modal-overlay" onClick={() => setShowResetVote(false)}>
+          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Reset voting?</h2>
+              <button className="modal-close" onClick={() => setShowResetVote(false)}>
+                ×
+              </button>
+            </div>
+            <div className="club-modal-body">
+              <p className="muted">
+                All cast votes are cleared{data.runoff ? " and the runoff ends" : ""}, and the club goes
+                back to the nomination stage. Nominations stay so the field can be adjusted before
+                voting again.
+              </p>
+              <div className="form-actions">
+                <button className="btn-primary" onClick={backToNominations}>
+                  Reset voting
+                </button>
+                <button className="btn-secondary" onClick={() => setShowResetVote(false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {vetoTarget && (
         <div className="modal-overlay" onClick={() => setVetoTarget(null)}>
           <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
@@ -773,6 +863,7 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
 
 function NominationRow({
   n,
+  voting,
   myVote,
   canVeto,
   isOwner,
@@ -782,6 +873,7 @@ function NominationRow({
   onRemove,
 }: {
   n: ClubNomination;
+  voting: boolean;
   myVote: boolean;
   canVeto: boolean;
   isOwner: boolean;
@@ -815,7 +907,7 @@ function NominationRow({
         </div>
       </div>
       <div className="actions">
-        {!vetoed && (
+        {!vetoed && voting && (
           <>
             <span className="club-vote-count" title={`${n.votes} vote${n.votes === 1 ? "" : "s"}`}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
