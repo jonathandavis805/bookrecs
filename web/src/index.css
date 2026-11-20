@@ -1642,6 +1642,7 @@ button.secondary:hover:not(:disabled) {
 
 .club-invited-label {
   margin-top: 12px;
+  margin-bottom: 6px;
 }
 
 .club-member {
@@ -1681,10 +1682,18 @@ button.secondary:hover:not(:disabled) {
 
 .club-invite-box {
   margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .club-invite-box input {
-  margin-bottom: 8px;
+  width: 100%;
+}
+
+.club-invite-box .club-friend-picker,
+.form-field .club-friend-picker {
+  margin-top: 0;
 }
 
 .club-friend-picker {

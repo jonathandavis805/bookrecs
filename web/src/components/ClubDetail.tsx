@@ -573,18 +573,20 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
               </p>
               {transferCandidates.length > 0 ? (
                 <>
-                  <span className="small-label">Transfer ownership to</span>
-                  <div className="club-friend-picker">
-                    {transferCandidates.map((m) => (
-                      <button
-                        type="button"
-                        key={m.user_id}
-                        className={"club-friend-chip" + (transferTarget === m.user_id ? " picked" : "")}
-                        onClick={() => setTransferTarget(m.user_id)}
-                      >
-                        @{m.username}
-                      </button>
-                    ))}
+                  <div className="form-field">
+                    <span className="small-label">Transfer ownership to</span>
+                    <div className="club-friend-picker">
+                      {transferCandidates.map((m) => (
+                        <button
+                          type="button"
+                          key={m.user_id}
+                          className={"club-friend-chip" + (transferTarget === m.user_id ? " picked" : "")}
+                          onClick={() => setTransferTarget(m.user_id)}
+                        >
+                          @{m.username}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="form-actions">
                     <button
