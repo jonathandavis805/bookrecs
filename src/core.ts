@@ -1318,6 +1318,7 @@ export interface ClubSummary {
   description: string | null;
   role: "owner" | "member";
   memberCount: number;
+  invitedCount: number;
   voting_open: number;
   nominations_open: number;
   nominationCount: number;
@@ -1426,6 +1427,7 @@ export async function listClubsForUser(db: D1Database, userId: number): Promise<
     db,
     `SELECT c.id, c.name, c.description, c.creator_id, c.voting_open, c.nominations_open, c.created_at, m.role,
        (SELECT COUNT(*) FROM club_members cm WHERE cm.club_id = c.id AND cm.status = 'accepted') AS memberCount,
+       (SELECT COUNT(*) FROM club_members cm WHERE cm.club_id = c.id AND cm.status = 'pending') AS invitedCount,
        (SELECT COUNT(*) FROM club_nominations n WHERE n.club_id = c.id) AS nominationCount
      FROM clubs c JOIN club_members m ON m.club_id = c.id
      WHERE m.user_id = ? AND m.status = 'accepted'

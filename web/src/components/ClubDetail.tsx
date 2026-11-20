@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { api, User, ClubDetailData, ClubNomination, SearchHit } from "../api";
+import { api, User, ClubDetailData, ClubMember, ClubNomination, SearchHit } from "../api";
 
 function goBackToClubs() {
   // Arrived from inside the app (the clubs list)? Go back so the browser
@@ -483,7 +483,9 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       </section>
 
       <section className="club-section">
-        <h3 className="section-title">Members</h3>
+        <h3 className="section-title">
+          Members ({data.members.filter((m) => m.status === "accepted").length})
+        </h3>
         <MembersPane
           data={data}
           userId={user.id}
@@ -1025,6 +1027,8 @@ function MembersPane({
   }, []);
 
   const memberIds = new Set(data.members.map((m) => m.user_id));
+  const accepted = data.members.filter((m) => m.status === "accepted");
+  const pending = data.members.filter((m) => m.status === "pending");
   const inviteCandidates = friends.filter(
     (f) =>
       !memberIds.has(f.user_id) &&
@@ -1045,33 +1049,41 @@ function MembersPane({
     }
   }
 
+  function memberRow(m: ClubMember) {
+    return (
+      <li key={m.user_id} className="club-member">
+        <button className="link club-member-name" onClick={() => (window.location.hash = `#/u/${encodeURIComponent(m.username)}`)}>
+          @{m.username}
+        </button>
+        <span className="muted club-member-tags">
+          {m.role === "owner" ? "owner" : "member"}
+          {m.status === "pending" && " · invited"}
+          {m.user_id === userId && " · you"}
+        </span>
+        {isOwner && m.role !== "owner" && (
+          <button
+            className="club-member-remove"
+            title={m.status === "pending" ? "Cancel invite" : "Remove from club"}
+            onClick={() => onRemove(m.user_id)}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        )}
+      </li>
+    );
+  }
+
   return (
     <div>
-      <ul className="club-member-list">
-        {data.members.map((m) => (
-          <li key={m.user_id} className="club-member">
-            <button className="link club-member-name" onClick={() => (window.location.hash = `#/u/${encodeURIComponent(m.username)}`)}>
-              @{m.username}
-            </button>
-            <span className="muted club-member-tags">
-              {m.role === "owner" ? "owner" : "member"}
-              {m.status === "pending" && " · invited"}
-              {m.user_id === userId && " · you"}
-            </span>
-            {isOwner && m.role !== "owner" && (
-              <button
-                className="club-member-remove"
-                title={m.status === "pending" ? "Cancel invite" : "Remove from club"}
-                onClick={() => onRemove(m.user_id)}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
+      <ul className="club-member-list">{accepted.map(memberRow)}</ul>
+      {pending.length > 0 && (
+        <>
+          <div className="small-label club-invited-label">Invited ({pending.length})</div>
+          <ul className="club-member-list">{pending.map(memberRow)}</ul>
+        </>
+      )}
       {inviteCandidates.length > 0 && (
         <div className="club-invite-box">
           <span className="small-label">Invite a friend</span>

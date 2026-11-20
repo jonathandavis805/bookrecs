@@ -1640,6 +1640,10 @@ button.secondary:hover:not(:disabled) {
   padding: 0;
 }
 
+.club-invited-label {
+  margin-top: 12px;
+}
+
 .club-member {
   display: flex;
   align-items: center;

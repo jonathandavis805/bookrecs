@@ -88,6 +88,7 @@ export interface ClubSummary {
   description: string | null;
   role: "owner" | "member";
   memberCount: number;
+  invitedCount: number;
   voting_open: number;
   nominations_open: number;
   nominationCount: number;
