@@ -25,6 +25,20 @@ function BackToClubs() {
   );
 }
 
+// The runoff field: the top two vote-getters. A tie at the top keeps all
+// tied leaders; a single leader is joined by whoever ties for second.
+// Mirrors runoffField in src/core.ts.
+function runoffField<T extends { votes: number }>(nominations: T[]): T[] {
+  if (nominations.length === 0) return [];
+  const topVotes = Math.max(...nominations.map((n) => n.votes));
+  const leaders = nominations.filter((n) => n.votes === topVotes);
+  if (leaders.length > 1) return leaders;
+  const rest = nominations.filter((n) => n.votes < topVotes);
+  if (rest.length === 0) return leaders;
+  const runnerUpVotes = Math.max(...rest.map((n) => n.votes));
+  return [...leaders, ...rest.filter((n) => n.votes === runnerUpVotes)];
+}
+
 export default function ClubDetail({ user, clubId }: { user: User; clubId: number }) {
   const [data, setData] = useState<ClubDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -141,6 +155,12 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   // A tie at the top (books sharing the lead with at least one vote).
   const topVotes = activeNominations.reduce((m, n) => Math.max(m, n.votes), 0);
   const tiedNominations = topVotes > 0 ? activeNominations.filter((n) => n.votes === topVotes) : [];
+  // A pick needs a simple majority (more than half the votes cast); anything
+  // else goes to a runoff among the top two, ties included.
+  const totalVotes = activeNominations.reduce((s, n) => s + n.votes, 0);
+  const hasMajority = tiedNominations.length === 1 && tiedNominations[0].votes * 2 > totalVotes;
+  const needsRunoff = totalVotes > 0 && !hasMajority;
+  const runoffNominations = runoffField(activeNominations);
   // Live order: most votes first (tied books hold their nomination order —
   // they only move when a count actually changes), vetoed nominations sink
   // to the bottom.
@@ -205,8 +225,9 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   }
 
   async function closeVote() {
-    // A tie at the top needs a runoff — offer it instead of failing.
-    if (tiedNominations.length > 1) {
+    // No majority (a tie or a narrow lead) needs a runoff — offer it
+    // instead of failing.
+    if (needsRunoff) {
       setShowRunoff(true);
       return;
     }
@@ -218,7 +239,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
     try {
       await api(`/api/clubs/${clubId}/runoff`, { method: "POST" });
       setShowRunoff(false);
-      setInfo("Runoff started — votes reset for the tied books.");
+      setInfo("Runoff started — votes reset for the runoff books.");
       await load();
     } catch (e: any) {
       setError(e.message);
@@ -332,11 +353,11 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                       ? data.nominations.length > 0
                         ? "Every nomination was vetoed"
                         : "Nominate at least one book first"
-                      : tiedNominations.length > 1
-                      ? "It's tied — a runoff will resolve it"
+                      : needsRunoff
+                      ? "No majority yet — a runoff will resolve it"
                       : activeNominations.every((n) => n.votes === 0)
                       ? "Waiting for votes"
-                      : "Most votes wins"
+                      : "Majority wins"
                   }
                 >
                   {data.runoff ? "Close runoff & pick winner" : "Close voting & pick winner"}
@@ -539,16 +560,19 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         <div className="modal-overlay" onClick={() => setShowRunoff(false)}>
           <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>It's a tie</h2>
+              <h2>{tiedNominations.length > 1 ? "It's a tie" : "No majority yet"}</h2>
               <button className="modal-close" onClick={() => setShowRunoff(false)}>
                 ×
               </button>
             </div>
             <div className="club-modal-body">
               <p className="muted">
-                {tiedNominations.map((n) => `"${n.title}"`).join(" and ")} are tied at {topVotes}{" "}
-                {topVotes === 1 ? "vote" : "votes"} each. Start a runoff? The other nominations are
-                dropped, votes reset, and everyone votes again between just these books.
+                {tiedNominations.length > 1
+                  ? `${tiedNominations.map((n) => `"${n.title}"`).join(" and ")} are tied at ${topVotes} ${topVotes === 1 ? "vote" : "votes"} each.`
+                  : `"${tiedNominations[0]?.title}" leads with ${topVotes} of ${totalVotes} votes — short of a majority.`}{" "}
+                Start a runoff between {runoffNominations.map((n) => `"${n.title}"`).join(" and ")}? The
+                other nominations are dropped, votes reset, and everyone votes again between just these
+                books.
               </p>
               <div className="form-actions">
                 <button className="btn-primary" disabled={runoffBusy} onClick={startRunoff}>

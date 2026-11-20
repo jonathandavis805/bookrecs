@@ -214,8 +214,8 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 | POST | `/api/clubs/:id/veto` | `{nominationId}` strike a nomination (one veto per member per vote) |
 | DELETE | `/api/clubs/:id/nominations/:nominationId` | owner: remove a nomination (accidental adds) |
 | DELETE | `/api/clubs/:id/vote` | remove your vote |
-| POST | `/api/clubs/:id/close-vote` | owner: most votes wins (a top tie is refused — start a runoff) |
-| POST | `/api/clubs/:id/runoff` | owner: head-to-head revote among the tied books |
+| POST | `/api/clubs/:id/close-vote` | owner: a simple majority wins (otherwise a runoff is offered) |
+| POST | `/api/clubs/:id/runoff` | owner: revote among the top two vote-getters (ties included) |
 | POST | `/api/clubs/:id/reopen-vote` | owner: start a new nomination/vote cycle |
 | DELETE | `/api/clubs/:id/members/:userId` | owner: remove a member / cancel invite |
 | POST | `/api/clubs/:id/leave` | member: leave the club |
@@ -243,8 +243,8 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 - **Book clubs** live under the Clubs tab. The owner creates a club and invites
   friends (anyone in the club can invite their own friends). While voting is
   open, members nominate books from Open Library and each cast one vote (you
-  can move or remove your vote). The owner closes the vote, the most-voted
-  book wins (ties go to the earliest nomination), and it becomes the club's
+  can move or remove your vote). The owner closes the vote; a book needs a
+  simple majority (more than half the votes cast) to win, and it becomes the club's
   current read with a one-tap "Start reading" into your personal list. The
   owner can then start a fresh vote; past picks are kept on the club page.
   Open club pages live-update over Server-Sent Events (`/api/clubs/:id/events`
@@ -253,9 +253,9 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   by live vote count with animated reordering (tied books hold their
   nomination order until a count actually changes), and each member gets one
   veto per vote: a vetoed nomination is struck (votes on it are released, it
-  can't win). Closing a tied vote offers a runoff instead of an arbitrary
-  winner: the non-tied books drop, votes reset, and the club votes again
-  between the tied books. The owner can also remove an accidentally
+  can't win). Closing a vote without a majority offers a runoff instead of an
+  arbitrary winner: the also-rans drop, votes reset, and the club votes again
+  between the top two vote-getters (all books tied at the top stay in). The owner can also remove an accidentally
   nominated book from the vote (members can re-nominate it fresh). Owners
   who want out must transfer ownership to a member or delete the club.
 - Starting a book is one tap: every book on a friend's profile has a "📖 Reading"

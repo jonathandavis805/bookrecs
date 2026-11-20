@@ -1763,11 +1763,23 @@ export async function removeNomination(
   return { ok: true };
 }
 
+// The runoff field: the top two vote-getters. A tie at the top keeps all
+// tied leaders; a single leader is joined by whoever ties for second.
+function runoffField<T extends { votes: number }>(nominations: T[]): T[] {
+  const topVotes = Math.max(...nominations.map((n) => n.votes));
+  const leaders = nominations.filter((n) => n.votes === topVotes);
+  if (leaders.length > 1) return leaders;
+  const rest = nominations.filter((n) => n.votes < topVotes);
+  if (rest.length === 0) return leaders;
+  const runnerUpVotes = Math.max(...rest.map((n) => n.votes));
+  return [...leaders, ...rest.filter((n) => n.votes === runnerUpVotes)];
+}
+
 export async function closeVote(
   db: D1Database,
   userId: number,
   clubId: number
-): Promise<{ ok: boolean; error?: string; pick?: ClubPickRow; tie?: boolean; tiedTitles?: string[] }> {
+): Promise<{ ok: boolean; error?: string; pick?: ClubPickRow; runoffNeeded?: boolean; runoffTitles?: string[] }> {
   const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
   if (!club) return { ok: false, error: "Club not found" };
   const membership = await getClubMembership(db, clubId, userId);
@@ -1790,20 +1802,27 @@ export async function closeVote(
   const totalVotes = nominations.reduce((sum, n) => sum + n.votes, 0);
   if (totalVotes === 0) return { ok: false, error: "No votes cast yet" };
 
-  // A tie at the top needs a runoff, not an arbitrary winner.
+  // The winner needs a simple majority — more than half the votes cast.
+  // A tie at the top, or a leader short of a majority, goes to a runoff
+  // instead of an arbitrary winner.
   const topVotes = Math.max(...nominations.map((n) => n.votes));
-  const tied = nominations.filter((n) => n.votes === topVotes);
-  if (tied.length > 1) {
-    const tiedTitles = tied.map((n) => n.title);
+  const leaders = nominations.filter((n) => n.votes === topVotes);
+  if (leaders.length > 1 || leaders[0].votes * 2 <= totalVotes) {
+    const field = runoffField(nominations);
+    const runoffTitles = field.map((n) => n.title);
+    const reason =
+      leaders.length > 1
+        ? `It's a tie between ${leaders.map((n) => `"${n.title}"`).join(" and ")}`
+        : `"${leaders[0].title}" leads with ${leaders[0].votes} of ${totalVotes} votes — short of a majority`;
     return {
       ok: false,
-      error: `It's a tie between ${tiedTitles.map((t) => `"${t}"`).join(" and ")} — start a runoff`,
-      tie: true,
-      tiedTitles,
+      error: `${reason} — start a runoff`,
+      runoffNeeded: true,
+      runoffTitles,
     };
   }
 
-  const winner = tied[0];
+  const winner = leaders[0];
 
   await execute(db, "INSERT INTO club_picks (club_id, book_id) VALUES (?, ?)", clubId, winner.book_id);
   await execute(db, "DELETE FROM club_votes WHERE nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)", clubId);
@@ -1830,7 +1849,7 @@ export async function startRunoff(
   db: D1Database,
   userId: number,
   clubId: number
-): Promise<{ ok: boolean; error?: string; tiedTitles?: string[] }> {
+): Promise<{ ok: boolean; error?: string; runoffTitles?: string[] }> {
   const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
   if (!club) return { ok: false, error: "Club not found" };
   const membership = await getClubMembership(db, clubId, userId);
@@ -1850,34 +1869,35 @@ export async function startRunoff(
   if (totalVotes === 0) return { ok: false, error: "No votes cast yet" };
 
   const topVotes = Math.max(...active.map((n) => n.votes));
-  const tied = active.filter((n) => n.votes === topVotes);
-  if (tied.length === 1) {
-    return { ok: false, error: `No tie to resolve — "${tied[0].title}" leads ${topVotes} to ${Math.max(0, ...active.filter((n) => n.id !== tied[0].id).map((n) => n.votes))}` };
+  const leaders = active.filter((n) => n.votes === topVotes);
+  if (leaders.length === 1 && leaders[0].votes * 2 > totalVotes) {
+    return { ok: false, error: `"${leaders[0].title}" already has a majority (${leaders[0].votes} of ${totalVotes} votes) — close the vote to pick it` };
   }
 
-  // Drop the non-tied nominations (they lost) and reset the votes on the
-  // tied ones so everyone re-votes with the final field in view. Vetoed
-  // rows stay struck until the vote closes.
-  const tiedIds = tied.map((n) => n.id);
+  // Drop the also-rans and reset the votes on the runoff field so everyone
+  // re-votes with the final field in view. Vetoed rows stay struck until the
+  // vote closes.
+  const field = runoffField(active);
+  const fieldIds = field.map((n) => n.id);
   await execute(
     db,
-    `DELETE FROM club_nominations WHERE club_id = ? AND id NOT IN (${tiedIds.map(() => "?").join(",")}) AND vetoed_by IS NULL`,
-    clubId, ...tiedIds
+    `DELETE FROM club_nominations WHERE club_id = ? AND id NOT IN (${fieldIds.map(() => "?").join(",")}) AND vetoed_by IS NULL`,
+    clubId, ...fieldIds
   );
   await execute(
     db,
-    `DELETE FROM club_votes WHERE nomination_id IN (${tiedIds.map(() => "?").join(",")})`,
-    ...tiedIds
+    `DELETE FROM club_votes WHERE nomination_id IN (${fieldIds.map(() => "?").join(",")})`,
+    ...fieldIds
   );
   await execute(db, "UPDATE clubs SET runoff = 1 WHERE id = ?", clubId);
 
-  const tiedTitles = tied.map((n) => n.title);
+  const runoffTitles = field.map((n) => n.title);
   await notifyAcceptedMembers(
     db, clubId, userId, "club_runoff",
-    `Runoff in "${club.name}": ${tiedTitles.map((t) => `"${t}"`).join(" vs ")} — vote again!`,
-    { clubId, name: club.name, tiedTitles }
+    `Runoff in "${club.name}": ${runoffTitles.map((t) => `"${t}"`).join(" vs ")} — vote again!`,
+    { clubId, name: club.name, runoffTitles }
   );
-  return { ok: true, tiedTitles };
+  return { ok: true, runoffTitles };
 }
 
 export async function reopenVote(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string }> {
