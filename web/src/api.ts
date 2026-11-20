@@ -88,7 +88,9 @@ export interface ClubSummary {
   description: string | null;
   role: "owner" | "member";
   memberCount: number;
+  invitedCount: number;
   voting_open: number;
+  nominations_open: number;
   nominationCount: number;
   currentPick: ClubPick | null;
   created_at: number;
@@ -134,10 +136,12 @@ export interface ClubDetailData {
     description: string | null;
     creator_id: number;
     voting_open: number;
+    nominations_open: number;
     created_at: number;
   };
   myRole: "owner" | "member";
   votingOpen: boolean;
+  nominationsOpen: boolean;
   runoff: boolean;
   members: ClubMember[];
   nominations: ClubNomination[];

@@ -1270,6 +1270,7 @@ export interface ClubRow {
   description: string | null;
   creator_id: number;
   voting_open: number;
+  nominations_open: number;
   runoff: number;
   created_at: number;
 }
@@ -1317,7 +1318,9 @@ export interface ClubSummary {
   description: string | null;
   role: "owner" | "member";
   memberCount: number;
+  invitedCount: number;
   voting_open: number;
+  nominations_open: number;
   nominationCount: number;
   currentPick: ClubPickRow | null;
   created_at: number;
@@ -1335,6 +1338,7 @@ export interface ClubDetail {
   club: ClubRow;
   myRole: "owner" | "member";
   votingOpen: boolean;
+  nominationsOpen: boolean;
   runoff: boolean;
   members: ClubMemberRow[];
   nominations: ClubNominationRow[];
@@ -1385,7 +1389,7 @@ export async function createClub(
   const creator = await getUserById(db, creatorId);
   const creatorName = creator?.username ?? "Someone";
 
-  await execute(db, "INSERT INTO clubs (name, description, creator_id) VALUES (?, ?, ?)", cleanName, cleanDesc, creatorId);
+  await execute(db, "INSERT INTO clubs (name, description, creator_id, voting_open, nominations_open) VALUES (?, ?, ?, 0, 1)", cleanName, cleanDesc, creatorId);
   const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE creator_id = ? ORDER BY id DESC LIMIT 1", creatorId);
   if (!club) return { ok: false, error: "Could not create club" };
   await execute(
@@ -1421,8 +1425,9 @@ export async function createClub(
 export async function listClubsForUser(db: D1Database, userId: number): Promise<{ clubs: ClubSummary[]; invites: ClubInviteSummary[] }> {
   const clubs = await queryAll<ClubSummary & { creator_id: number }>(
     db,
-    `SELECT c.id, c.name, c.description, c.creator_id, c.voting_open, c.created_at, m.role,
+    `SELECT c.id, c.name, c.description, c.creator_id, c.voting_open, c.nominations_open, c.created_at, m.role,
        (SELECT COUNT(*) FROM club_members cm WHERE cm.club_id = c.id AND cm.status = 'accepted') AS memberCount,
+       (SELECT COUNT(*) FROM club_members cm WHERE cm.club_id = c.id AND cm.status = 'pending') AS invitedCount,
        (SELECT COUNT(*) FROM club_nominations n WHERE n.club_id = c.id) AS nominationCount
      FROM clubs c JOIN club_members m ON m.club_id = c.id
      WHERE m.user_id = ? AND m.status = 'accepted'
@@ -1514,6 +1519,7 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
     club,
     myRole: membership.role,
     votingOpen: club.voting_open === 1,
+    nominationsOpen: club.nominations_open === 1,
     runoff: club.runoff === 1,
     members,
     nominations,
@@ -1610,8 +1616,9 @@ export async function nominateBook(
   if (!club) return { ok: false, error: "Club not found" };
   const membership = await getClubMembership(db, clubId, userId);
   if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
-  if (club.voting_open !== 1) return { ok: false, error: "Voting is closed for the current pick" };
-  if (club.runoff === 1) return { ok: false, error: "Nominations are paused during the runoff" };
+  if (club.nominations_open !== 1) {
+    return { ok: false, error: club.voting_open === 1 ? "Nominations are closed while voting is open" : "Nominations are closed for the current pick" };
+  }
 
   let book: BookRow | null = null;
   if (opts.bookId != null) {
@@ -1660,7 +1667,7 @@ export async function voteForNomination(
   if (!club) return { ok: false, error: "Club not found" };
   const membership = await getClubMembership(db, clubId, userId);
   if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
-  if (club.voting_open !== 1) return { ok: false, error: "Voting is closed for the current pick" };
+  if (club.voting_open !== 1) return { ok: false, error: club.nominations_open === 1 ? "Voting hasn't opened yet — the club is still nominating" : "Voting is closed for the current pick" };
 
   const nomination = await queryOne<{ vetoed_by: number | null }>(
     db,
@@ -1699,7 +1706,7 @@ export async function vetoNomination(
   if (!club) return { ok: false, error: "Club not found" };
   const membership = await getClubMembership(db, clubId, userId);
   if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
-  if (club.voting_open !== 1) return { ok: false, error: "Voting is closed for the current pick" };
+  if (club.voting_open !== 1) return { ok: false, error: club.nominations_open === 1 ? "Voting hasn't opened yet — the club is still nominating" : "Voting is closed for the current pick" };
 
   const nomination = await queryOne<{ vetoed_by: number | null; title: string }>(
     db,
@@ -1784,7 +1791,7 @@ export async function closeVote(
   if (!club) return { ok: false, error: "Club not found" };
   const membership = await getClubMembership(db, clubId, userId);
   if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can close the vote" };
-  if (club.voting_open !== 1) return { ok: false, error: "Voting is already closed" };
+  if (club.voting_open !== 1) return { ok: false, error: club.nominations_open === 1 ? "Voting hasn't opened yet — the club is still nominating" : "Voting is already closed" };
 
   // Vetoed nominations can't win — only active ones count.
   const nominations = await queryAll<{ id: number; book_id: number; title: string; votes: number; created_at: number }>(
@@ -1854,7 +1861,7 @@ export async function startRunoff(
   if (!club) return { ok: false, error: "Club not found" };
   const membership = await getClubMembership(db, clubId, userId);
   if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can start a runoff" };
-  if (club.voting_open !== 1) return { ok: false, error: "Voting is closed for the current pick" };
+  if (club.voting_open !== 1) return { ok: false, error: club.nominations_open === 1 ? "Voting hasn't opened yet — the club is still nominating" : "Voting is closed for the current pick" };
 
   const active = await queryAll<{ id: number; title: string; votes: number }>(
     db,
@@ -1900,17 +1907,61 @@ export async function startRunoff(
   return { ok: true, runoffTitles };
 }
 
-export async function reopenVote(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string }> {
+// Closed -> nominating: the owner kicks off a new cycle.
+export async function openNominations(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string }> {
   const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
   if (!club) return { ok: false, error: "Club not found" };
   const membership = await getClubMembership(db, clubId, userId);
-  if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can start a new vote" };
-  if (club.voting_open === 1) return { ok: false, error: "Voting is already open" };
+  if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can start a new cycle" };
+  if (club.voting_open === 1 || club.nominations_open === 1) return { ok: false, error: "A cycle is already in progress" };
 
-  await execute(db, "UPDATE clubs SET voting_open = 1, runoff = 0 WHERE id = ?", clubId);
+  await execute(db, "UPDATE clubs SET nominations_open = 1, voting_open = 0, runoff = 0 WHERE id = ?", clubId);
   await notifyAcceptedMembers(
-    db, clubId, userId, "club_vote_reopen",
-    `Voting for the next book is open in "${club.name}"`,
+    db, clubId, userId, "club_nominations_open",
+    `Nominations are open for the next book in "${club.name}"`,
+    { clubId, name: club.name }
+  );
+  return { ok: true };
+}
+
+// Nominating -> voting: the owner locks nominations and opens the vote.
+export async function startVoting(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can open the vote" };
+  if (club.nominations_open !== 1) return { ok: false, error: "The club is not in the nomination stage" };
+  const anyActive = await queryOne(db, "SELECT 1 FROM club_nominations WHERE club_id = ? AND vetoed_by IS NULL", clubId);
+  if (!anyActive) return { ok: false, error: "Nominate at least one book before opening the vote" };
+
+  await execute(db, "UPDATE clubs SET nominations_open = 0, voting_open = 1 WHERE id = ?", clubId);
+  await notifyAcceptedMembers(
+    db, clubId, userId, "club_voting_open",
+    `Voting is open in "${club.name}" — cast your vote!`,
+    { clubId, name: club.name }
+  );
+  return { ok: true };
+}
+
+// Voting -> nominating: the owner resets the vote (including a runoff) and
+// reopens nominations. All cast votes are cleared; nominations and vetoes
+// stay so the field can be adjusted before voting again.
+export async function backToNominations(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can reset the vote" };
+  if (club.voting_open !== 1) return { ok: false, error: "Voting is not open" };
+
+  await execute(
+    db,
+    "DELETE FROM club_votes WHERE nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)",
+    clubId
+  );
+  await execute(db, "UPDATE clubs SET nominations_open = 1, voting_open = 0, runoff = 0 WHERE id = ?", clubId);
+  await notifyAcceptedMembers(
+    db, clubId, userId, "club_nominations_reset",
+    `Voting was reset in "${club.name}" — back to nominations`,
     { clubId, name: club.name }
   );
   return { ok: true };
@@ -2008,8 +2059,8 @@ export async function transferClubOwnership(
 }
 
 // Cheap change detection for the live club stream: the string shifts any
-// time something visible on the club page changes (club, membership, roles,
-// nominations, vetoes, votes, picks, runoff state). One query per check.
+// time something visible on the club page changes (club, stage, membership,
+// roles, nominations, vetoes, votes, picks, runoff state). One query per check.
 export async function getClubVersion(db: D1Database, clubId: number): Promise<string> {
   const row = await queryOne<{ c: string }>(
     db,
@@ -2019,6 +2070,8 @@ export async function getClubVersion(db: D1Database, clubId: number): Promise<st
        (SELECT COUNT(*) FROM club_members WHERE club_id = ? AND role = 'owner') || '-' ||
        (SELECT COUNT(*) FROM club_members WHERE club_id = ? AND status = 'accepted') || '-' ||
        (SELECT COALESCE(MAX(runoff), 0) FROM clubs WHERE id = ?) || '-' ||
+       (SELECT COALESCE(MAX(voting_open), 0) FROM clubs WHERE id = ?) || '-' ||
+       (SELECT COALESCE(MAX(nominations_open), 0) FROM clubs WHERE id = ?) || '-' ||
        (SELECT COUNT(*) FROM club_nominations WHERE club_id = ?) || '-' ||
        (SELECT COUNT(*) FROM club_nominations WHERE club_id = ? AND vetoed_by IS NOT NULL) || '-' ||
        (SELECT COUNT(*) FROM club_votes v JOIN club_nominations n ON n.id = v.nomination_id WHERE n.club_id = ?) || '-' ||
@@ -2026,7 +2079,7 @@ export async function getClubVersion(db: D1Database, clubId: number): Promise<st
        (SELECT COALESCE(MAX(created_at), 0) FROM club_nominations WHERE club_id = ?) || '-' ||
        (SELECT COUNT(*) FROM club_picks WHERE club_id = ?)
      AS c`,
-    clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId
+    clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId
   );
-  return row?.c ?? "0-0-0-0-0-0-0-0-0-0-0";
+  return row?.c ?? "0-0-0-0-0-0-0-0-0-0-0-0-0";
 }
