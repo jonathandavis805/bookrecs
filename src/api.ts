@@ -697,7 +697,7 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (clubCloseVote && method === "POST") {
     const r = await core.closeVote(db, user.id, Number(clubCloseVote[1]));
     if (r.error) {
-      return json({ error: r.error, ...(r.tie ? { tie: true, tiedTitles: r.tiedTitles ?? [] } : {}) }, 400);
+      return json({ error: r.error, ...(r.runoffNeeded ? { runoffNeeded: true, runoffTitles: r.runoffTitles ?? [] } : {}) }, 400);
     }
     return json(r);
   }
