@@ -11,6 +11,7 @@ import Settings from "./components/Settings";
 import Notifications from "./components/Notifications";
 import Clubs from "./components/Clubs";
 import ClubDetail from "./components/ClubDetail";
+import UserMenu from "./components/UserMenu";
 
 type Route =
   | { name: "books" }
@@ -146,12 +147,11 @@ function Main({
             </svg>
             {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
           </button>
-          <button className="link" onClick={() => (window.location.hash = "#/account")} title="My Account">
-            @{user.username}
-          </button>
-          <button className="link" onClick={logout}>
-            Log out
-          </button>
+          <UserMenu
+            username={user.username}
+            onAccount={() => (window.location.hash = "#/account")}
+            onLogout={logout}
+          />
         </div>
       </header>
       <main>

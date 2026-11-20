@@ -250,6 +250,73 @@ button.danger:hover:not(:disabled) {
   gap: 12px;
 }
 
+/* ---------- User menu ---------- */
+.user-menu {
+  position: relative;
+}
+
+.user-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.user-menu-chevron {
+  transition: transform 0.15s ease;
+}
+
+.user-menu-chevron.open {
+  transform: rotate(180deg);
+}
+
+.user-menu-card {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 180px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 50;
+  transform-origin: top right;
+}
+
+.user-menu-card button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.user-menu-card button:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.04);
+  text-decoration: none;
+}
+
+.user-menu-card button.danger:hover:not(:disabled) {
+  background: rgba(179, 64, 64, 0.06);
+  text-decoration: none;
+}
+
+.user-menu-card svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.user-menu-card button.danger svg {
+  color: var(--danger);
+}
+
 .username {
   color: var(--muted);
   font-weight: 600;
