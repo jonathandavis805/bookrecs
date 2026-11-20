@@ -212,8 +212,10 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 | POST | `/api/clubs/:id/nominate` | `{ol_key?, book_id?, year?}` nominate a book (while voting is open) |
 | POST | `/api/clubs/:id/vote` | `{nominationId}` cast/move your one vote |
 | POST | `/api/clubs/:id/veto` | `{nominationId}` strike a nomination (one veto per member per vote) |
+| DELETE | `/api/clubs/:id/nominations/:nominationId` | owner: remove a nomination (accidental adds) |
 | DELETE | `/api/clubs/:id/vote` | remove your vote |
-| POST | `/api/clubs/:id/close-vote` | owner: most votes wins, becomes the current read |
+| POST | `/api/clubs/:id/close-vote` | owner: most votes wins (a top tie is refused — start a runoff) |
+| POST | `/api/clubs/:id/runoff` | owner: head-to-head revote among the tied books |
 | POST | `/api/clubs/:id/reopen-vote` | owner: start a new nomination/vote cycle |
 | DELETE | `/api/clubs/:id/members/:userId` | owner: remove a member / cancel invite |
 | POST | `/api/clubs/:id/leave` | member: leave the club |
@@ -229,7 +231,8 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   default private — flip the Public switch on a book to share it. Your
   **currently reading** list has no privacy flag and is always visible to friends.
 - Tabs are real pages with hash URLs — `#/books`, `#/add`, `#/friends`,
-  `#/u/<username>` — so reloading keeps you on the same page.
+  `#/account` (My Account, via the @username link), `#/u/<username>` — so
+  reloading keeps you on the same page.
 - Friend requests are mutual: a pending request from the other side is
   auto-accepted when you send yours.
 - Book search and display are English-first: author names are resolved to
@@ -247,10 +250,14 @@ Bearer <token>` where the token is minted via `POST /api/token`).
   Open club pages live-update over Server-Sent Events (`/api/clubs/:id/events`
   pushes the detail within ~half a second of a change) with an automatic
   5s-polling fallback when the stream can't connect. Nominations are ordered
-  by live vote count with animated reordering, and each member gets one veto
-  per vote: a vetoed nomination is struck (votes on it are released, it
-  can't win). Owners who want out must transfer ownership to a member or
-  delete the club.
+  by live vote count with animated reordering (tied books hold their
+  nomination order until a count actually changes), and each member gets one
+  veto per vote: a vetoed nomination is struck (votes on it are released, it
+  can't win). Closing a tied vote offers a runoff instead of an arbitrary
+  winner: the non-tied books drop, votes reset, and the club votes again
+  between the tied books. The owner can also remove an accidentally
+  nominated book from the vote (members can re-nominate it fresh). Owners
+  who want out must transfer ownership to a member or delete the club.
 - Starting a book is one tap: every book on a friend's profile has a "📖 Reading"
   quick action (plus "♡ Wishlist"), and your own wishlist items have a
   "📖 Reading" button to start reading them.

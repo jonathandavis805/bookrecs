@@ -1218,6 +1218,7 @@ export interface ClubRow {
   description: string | null;
   creator_id: number;
   voting_open: number;
+  runoff: number;
   created_at: number;
 }
 
@@ -1282,6 +1283,7 @@ export interface ClubDetail {
   club: ClubRow;
   myRole: "owner" | "member";
   votingOpen: boolean;
+  runoff: boolean;
   members: ClubMemberRow[];
   nominations: ClubNominationRow[];
   myVote: number | null;
@@ -1460,6 +1462,7 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
     club,
     myRole: membership.role,
     votingOpen: club.voting_open === 1,
+    runoff: club.runoff === 1,
     members,
     nominations,
     myVote: myVoteRow?.nomination_id ?? null,
@@ -1556,6 +1559,7 @@ export async function nominateBook(
   const membership = await getClubMembership(db, clubId, userId);
   if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
   if (club.voting_open !== 1) return { ok: false, error: "Voting is closed for the current pick" };
+  if (club.runoff === 1) return { ok: false, error: "Nominations are paused during the runoff" };
 
   let book: BookRow | null = null;
   if (opts.bookId != null) {
@@ -1672,11 +1676,46 @@ export async function vetoNomination(
   return { ok: true };
 }
 
+export async function removeNomination(
+  db: D1Database,
+  userId: number,
+  clubId: number,
+  nominationId: number
+): Promise<{ ok: boolean; error?: string }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.status !== "accepted") return { ok: false, error: "You are not a member of this club" };
+  if (membership.role !== "owner") return { ok: false, error: "Only the club owner can remove nominations" };
+
+  const nomination = await queryOne<{ title: string }>(
+    db,
+    `SELECT b.title FROM club_nominations n JOIN books b ON b.id = n.book_id
+     WHERE n.id = ? AND n.club_id = ?`,
+    nominationId, clubId
+  );
+  if (!nomination) return { ok: false, error: "Nomination not found" };
+
+  // A removal takes the book out entirely — votes on it are released, and
+  // because the row is gone it can be nominated again like new. Unlike a
+  // veto it isn't recorded anywhere (that's the point: it never belonged).
+  await execute(db, "DELETE FROM club_votes WHERE nomination_id = ?", nominationId);
+  await execute(db, "DELETE FROM club_nominations WHERE id = ?", nominationId);
+
+  const owner = await getUserById(db, userId);
+  await notifyAcceptedMembers(
+    db, clubId, userId, "club_nomination_removed",
+    `@${owner?.username ?? "Someone"} removed "${nomination.title}" from the vote in "${club.name}"`,
+    { clubId, name: club.name, bookTitle: nomination.title }
+  );
+  return { ok: true };
+}
+
 export async function closeVote(
   db: D1Database,
   userId: number,
   clubId: number
-): Promise<{ ok: boolean; error?: string; pick?: ClubPickRow }> {
+): Promise<{ ok: boolean; error?: string; pick?: ClubPickRow; tie?: boolean; tiedTitles?: string[] }> {
   const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
   if (!club) return { ok: false, error: "Club not found" };
   const membership = await getClubMembership(db, clubId, userId);
@@ -1699,13 +1738,25 @@ export async function closeVote(
   const totalVotes = nominations.reduce((sum, n) => sum + n.votes, 0);
   if (totalVotes === 0) return { ok: false, error: "No votes cast yet" };
 
-  // Winner: most votes; ties broken by earliest nomination.
-  const winner = [...nominations].sort((a, b) => (b.votes - a.votes) || (a.created_at - b.created_at))[0];
+  // A tie at the top needs a runoff, not an arbitrary winner.
+  const topVotes = Math.max(...nominations.map((n) => n.votes));
+  const tied = nominations.filter((n) => n.votes === topVotes);
+  if (tied.length > 1) {
+    const tiedTitles = tied.map((n) => n.title);
+    return {
+      ok: false,
+      error: `It's a tie between ${tiedTitles.map((t) => `"${t}"`).join(" and ")} — start a runoff`,
+      tie: true,
+      tiedTitles,
+    };
+  }
+
+  const winner = tied[0];
 
   await execute(db, "INSERT INTO club_picks (club_id, book_id) VALUES (?, ?)", clubId, winner.book_id);
   await execute(db, "DELETE FROM club_votes WHERE nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)", clubId);
   await execute(db, "DELETE FROM club_nominations WHERE club_id = ?", clubId);
-  await execute(db, "UPDATE clubs SET voting_open = 0 WHERE id = ?", clubId);
+  await execute(db, "UPDATE clubs SET voting_open = 0, runoff = 0 WHERE id = ?", clubId);
 
   await notifyAcceptedMembers(
     db, clubId, userId, "club_pick",
@@ -1723,6 +1774,60 @@ export async function closeVote(
   return { ok: true, pick: pick ?? undefined };
 }
 
+export async function startRunoff(
+  db: D1Database,
+  userId: number,
+  clubId: number
+): Promise<{ ok: boolean; error?: string; tiedTitles?: string[] }> {
+  const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
+  if (!club) return { ok: false, error: "Club not found" };
+  const membership = await getClubMembership(db, clubId, userId);
+  if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can start a runoff" };
+  if (club.voting_open !== 1) return { ok: false, error: "Voting is closed for the current pick" };
+
+  const active = await queryAll<{ id: number; title: string; votes: number }>(
+    db,
+    `SELECT n.id, b.title,
+       (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id) AS votes
+     FROM club_nominations n JOIN books b ON b.id = n.book_id
+     WHERE n.club_id = ? AND n.vetoed_by IS NULL
+     ORDER BY n.created_at ASC`,
+    clubId
+  );
+  const totalVotes = active.reduce((sum, n) => sum + n.votes, 0);
+  if (totalVotes === 0) return { ok: false, error: "No votes cast yet" };
+
+  const topVotes = Math.max(...active.map((n) => n.votes));
+  const tied = active.filter((n) => n.votes === topVotes);
+  if (tied.length === 1) {
+    return { ok: false, error: `No tie to resolve — "${tied[0].title}" leads ${topVotes} to ${Math.max(0, ...active.filter((n) => n.id !== tied[0].id).map((n) => n.votes))}` };
+  }
+
+  // Drop the non-tied nominations (they lost) and reset the votes on the
+  // tied ones so everyone re-votes with the final field in view. Vetoed
+  // rows stay struck until the vote closes.
+  const tiedIds = tied.map((n) => n.id);
+  await execute(
+    db,
+    `DELETE FROM club_nominations WHERE club_id = ? AND id NOT IN (${tiedIds.map(() => "?").join(",")}) AND vetoed_by IS NULL`,
+    clubId, ...tiedIds
+  );
+  await execute(
+    db,
+    `DELETE FROM club_votes WHERE nomination_id IN (${tiedIds.map(() => "?").join(",")})`,
+    ...tiedIds
+  );
+  await execute(db, "UPDATE clubs SET runoff = 1 WHERE id = ?", clubId);
+
+  const tiedTitles = tied.map((n) => n.title);
+  await notifyAcceptedMembers(
+    db, clubId, userId, "club_runoff",
+    `Runoff in "${club.name}": ${tiedTitles.map((t) => `"${t}"`).join(" vs ")} — vote again!`,
+    { clubId, name: club.name, tiedTitles }
+  );
+  return { ok: true, tiedTitles };
+}
+
 export async function reopenVote(db: D1Database, userId: number, clubId: number): Promise<{ ok: boolean; error?: string }> {
   const club = await queryOne<ClubRow>(db, "SELECT * FROM clubs WHERE id = ?", clubId);
   if (!club) return { ok: false, error: "Club not found" };
@@ -1730,7 +1835,7 @@ export async function reopenVote(db: D1Database, userId: number, clubId: number)
   if (!membership || membership.role !== "owner") return { ok: false, error: "Only the club owner can start a new vote" };
   if (club.voting_open === 1) return { ok: false, error: "Voting is already open" };
 
-  await execute(db, "UPDATE clubs SET voting_open = 1 WHERE id = ?", clubId);
+  await execute(db, "UPDATE clubs SET voting_open = 1, runoff = 0 WHERE id = ?", clubId);
   await notifyAcceptedMembers(
     db, clubId, userId, "club_vote_reopen",
     `Voting for the next book is open in "${club.name}"`,
@@ -1832,7 +1937,7 @@ export async function transferClubOwnership(
 
 // Cheap change detection for the live club stream: the string shifts any
 // time something visible on the club page changes (club, membership, roles,
-// nominations, vetoes, votes, picks). One query per check.
+// nominations, vetoes, votes, picks, runoff state). One query per check.
 export async function getClubVersion(db: D1Database, clubId: number): Promise<string> {
   const row = await queryOne<{ c: string }>(
     db,
@@ -1841,6 +1946,7 @@ export async function getClubVersion(db: D1Database, clubId: number): Promise<st
        (SELECT COUNT(*) FROM club_members WHERE club_id = ?) || '-' ||
        (SELECT COUNT(*) FROM club_members WHERE club_id = ? AND role = 'owner') || '-' ||
        (SELECT COUNT(*) FROM club_members WHERE club_id = ? AND status = 'accepted') || '-' ||
+       (SELECT COALESCE(MAX(runoff), 0) FROM clubs WHERE id = ?) || '-' ||
        (SELECT COUNT(*) FROM club_nominations WHERE club_id = ?) || '-' ||
        (SELECT COUNT(*) FROM club_nominations WHERE club_id = ? AND vetoed_by IS NOT NULL) || '-' ||
        (SELECT COUNT(*) FROM club_votes v JOIN club_nominations n ON n.id = v.nomination_id WHERE n.club_id = ?) || '-' ||
@@ -1848,7 +1954,7 @@ export async function getClubVersion(db: D1Database, clubId: number): Promise<st
        (SELECT COALESCE(MAX(created_at), 0) FROM club_nominations WHERE club_id = ?) || '-' ||
        (SELECT COUNT(*) FROM club_picks WHERE club_id = ?)
      AS c`,
-    clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId
+    clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId, clubId
   );
-  return row?.c ?? "0-0-0-0-0-0-0-0-0-0";
+  return row?.c ?? "0-0-0-0-0-0-0-0-0-0-0";
 }

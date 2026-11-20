@@ -4,6 +4,7 @@ import Auth from "./components/Auth";
 import MyBooks from "./components/MyBooks";
 import AddBook from "./components/AddBook";
 import Friends from "./components/Friends";
+import Account from "./components/Account";
 import Profile from "./components/Profile";
 import BookDetail from "./components/BookDetail";
 import Settings from "./components/Settings";
@@ -15,6 +16,7 @@ type Route =
   | { name: "books" }
   | { name: "add" }
   | { name: "friends" }
+  | { name: "account" }
   | { name: "clubs" }
   | { name: "profile"; username: string }
   | { name: "book"; bookId: number }
@@ -33,6 +35,7 @@ function parseRoute(): Route {
   if (h.startsWith("#/u/")) return { name: "profile", username: decodeURIComponent(h.slice(4)) };
   if (h === "#/add") return { name: "add" };
   if (h === "#/friends") return { name: "friends" };
+  if (h === "#/account") return { name: "account" };
   if (h === "#/clubs") return { name: "clubs" };
   return { name: "books" };
 }
@@ -126,7 +129,7 @@ function Main({
             Add Book
           </button>
           <button className={active === "friends" ? "active" : ""} onClick={() => onNavigate("friends")}>
-            My Account
+            Friends
           </button>
           <button className={active === "clubs" ? "active" : ""} onClick={() => onNavigate("clubs")}>
             Clubs
@@ -143,7 +146,7 @@ function Main({
             </svg>
             {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
           </button>
-          <button className="link" onClick={() => openProfile(user.username)} title="Your profile">
+          <button className="link" onClick={() => (window.location.hash = "#/account")} title="My Account">
             @{user.username}
           </button>
           <button className="link" onClick={logout}>
@@ -162,13 +165,14 @@ function Main({
         )}
         {active === "add" && <AddBook />}
         {active === "friends" && (
-          <Friends 
-            user={user} 
+          <Friends
             refreshKey={friendRequestsVersion}
             onFriendRequestsChanged={bumpFriendRequests}
-            onOpenProfile={openProfile} 
-            onChangePassword={() => setShowSettings(true)} 
+            onOpenProfile={openProfile}
           />
+        )}
+        {route.name === "account" && (
+          <Account user={user} onChangePassword={() => setShowSettings(true)} />
         )}
         {active === "clubs" && (
           <Clubs
