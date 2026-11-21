@@ -152,6 +152,26 @@ export interface ClubDetailData {
   pastPicks: ClubPick[];
 }
 
+// Mirrors NotificationItem in src/notifications.ts.
+export interface NotificationItem {
+  key: string;
+  ids: number[];
+  type: string;
+  actionable: boolean;
+  message: string;
+  details: string[];
+  data: {
+    clubId?: number;
+    requestId?: number;
+    status?: string;
+    userId?: number;
+    id?: number;
+    rejected_at?: number;
+  } | null;
+  read: boolean;
+  created_at: number;
+}
+
 export function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

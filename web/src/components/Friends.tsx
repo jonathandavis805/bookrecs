@@ -164,7 +164,7 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
               return (
                 <li key={u.id} className="row">
                   <a className="user-link" href={`#/u/${encodeURIComponent(u.username)}`}>
-                    @{u.username}
+                    {u.username}
                   </a>
                   <div className="actions">
                     {isFriend ? (
@@ -191,7 +191,7 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
             <ul className="plain-list">
               {incoming.map((r) => (
                 <li key={r.id} className="row">
-                  <span className="username">@{r.username}</span>
+                  <span className="username">{r.username}</span>
                   <div className="actions">
                     <button type="button" className="btn-secondary btn-sm" onClick={() => respond(r.id, "decline")}>
                       Decline
@@ -212,7 +212,7 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
             <ul className="plain-list">
               {outgoing.map((r) => (
                 <li key={r.id} className="row">
-                  <span className="username">@{r.username}</span>
+                  <span className="username">{r.username}</span>
                   <span className="muted">pending</span>
                 </li>
               ))}
@@ -232,7 +232,7 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
                 <li key={f.user_id} className="row friend-row">
                   <div className="friend-row-head">
                     <a className="user-link" href={`#/u/${encodeURIComponent(f.username)}`}>
-                      @{f.username}
+                      {f.username}
                     </a>
                     <div className="actions">
                       <button type="button" onClick={() => onOpenProfile(f.username)}>

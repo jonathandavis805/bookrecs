@@ -47,7 +47,7 @@ export default function Account({ user, onChangePassword }: AccountProps) {
         <div className="account-details">
           <div className="detail-row">
             <span className="detail-label">Username</span>
-            <span className="detail-value">@{user.username}</span>
+            <span className="detail-value">{user.username}</span>
           </div>
           <div className="detail-row">
             <span className="detail-label">Email</span>

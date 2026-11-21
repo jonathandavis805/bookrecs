@@ -575,7 +575,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                         className={`chip${transferTarget === m.user_id ? " picked" : ""}`}
                         onClick={() => setTransferTarget(m.user_id)}
                       >
-                        @{m.username}
+                        {m.username}
                       </button>
                     ))}
                   </div>
@@ -814,9 +814,9 @@ function NominationRow({
         <div className="title">
           {n.title}
           {myVote && <span className="badge accent">Your vote</span>}
-          {vetoed && <span className="badge danger">Vetoed by @{n.vetoedBy ?? "a member"}</span>}
+          {vetoed && <span className="badge danger">Vetoed by {n.vetoedBy ?? "a member"}</span>}
         </div>
-        <Byline author={n.author} year={n.first_publish_year} extra={`nominated by @${n.nominatedBy}`} />
+        <Byline author={n.author} year={n.first_publish_year} extra={`nominated by ${n.nominatedBy}`} />
       </div>
       <div className="actions">
         {!vetoed && voting && (
@@ -978,11 +978,11 @@ function MembersPane({
           method: "POST",
           body: JSON.stringify({ username: r.username }),
         });
-        setNote(`You're now friends with @${r.username} — invite sent.`);
+        setNote(`You're now friends with ${r.username} — invite sent.`);
         loadFriends();
         onInvited();
       } else {
-        setNote(`Friend request sent to @${r.username ?? q} — you can invite them once they accept.`);
+        setNote(`Friend request sent to ${r.username ?? q} — you can invite them once they accept.`);
       }
     } catch (e) {
       onError(errorMessage(e));
@@ -995,7 +995,7 @@ function MembersPane({
     return (
       <li key={m.user_id} className="club-member">
         <a href={`#/u/${encodeURIComponent(m.username)}`} className="club-member-name">
-          @{m.username}
+          {m.username}
         </a>
         <span className="muted club-member-tags">
           {m.role === "owner" ? "owner" : "member"}
@@ -1034,7 +1034,7 @@ function MembersPane({
             <div className="chip-picker">
               {inviteCandidates.map((f) => (
                 <button key={f.user_id} type="button" className="chip" onClick={() => invite(f.username)}>
-                  @{f.username}
+                  {f.username}
                 </button>
               ))}
             </div>

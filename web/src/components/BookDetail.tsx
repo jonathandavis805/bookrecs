@@ -165,7 +165,7 @@ export default function BookDetail({ bookId }: { bookId: number }) {
               <li key={friend.username} className="book-row">
                 <div className="info">
                   <div className="title">
-                    <span className="friend-name">@{friend.username}</span>
+                    <span className="friend-name">{friend.username}</span>
                   </div>
                   <div className="author">Currently reading</div>
                 </div>
@@ -192,7 +192,7 @@ export default function BookDetail({ bookId }: { bookId: number }) {
             <li className="book-row review-row">
               <div className="info">
                 <div className="title">
-                  <span className="friend-name">@{friendsWithReviews[reviewIndex].username}</span>
+                  <span className="friend-name">{friendsWithReviews[reviewIndex].username}</span>
                   <span className="review-rank">#{friendsWithReviews[reviewIndex].rank}</span>
                 </div>
                 <p className="review-text">{friendsWithReviews[reviewIndex].review}</p>
@@ -225,7 +225,7 @@ export default function BookDetail({ bookId }: { bookId: number }) {
               <li key={friend.username} className="book-row">
                 <div className="info">
                   <div className="title">
-                    <span className="friend-name">@{friend.username}</span>
+                    <span className="friend-name">{friend.username}</span>
                   </div>
                   <div className="author">Read this book</div>
                 </div>
@@ -251,7 +251,7 @@ export default function BookDetail({ bookId }: { bookId: number }) {
               <li key={friend.username} className="book-row">
                 <div className="info">
                   <div className="title">
-                    <span className="friend-name">@{friend.username}</span>
+                    <span className="friend-name">{friend.username}</span>
                   </div>
                   <div className="author">Wants to read</div>
                 </div>

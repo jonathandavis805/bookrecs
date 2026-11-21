@@ -17,7 +17,8 @@
     "lint:fix": "biome check --write . && stylelint --fix \"web/src/**/*.css\"",
     "typecheck": "bun run --cwd web typecheck",
     "knip": "knip",
-    "check": "bun run lint && bun run typecheck && bun run knip"
+    "check": "bun run lint && bun run typecheck && bun run knip && bun run test",
+    "test": "bun test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",

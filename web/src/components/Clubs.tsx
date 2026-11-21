@@ -70,7 +70,7 @@ export default function Clubs({ refreshKey, onClubsChanged }: { refreshKey: numb
               <li key={inv.clubId} className="row club-invite-row">
                 <div className="info">
                   <div className="title">{inv.name}</div>
-                  <div className="author">Invited by {inv.inviter ? `@${inv.inviter}` : "a friend"}</div>
+                  <div className="author">Invited by {inv.inviter ? `${inv.inviter}` : "a friend"}</div>
                 </div>
                 <div className="actions">
                   <button type="button" className="btn-secondary btn-sm" onClick={() => respond(inv.clubId, false)}>
@@ -223,7 +223,7 @@ function CreateClub({ onDone }: { onDone: (clubId: number | null) => void }) {
                   className={`chip${picked.has(f.user_id) ? " picked" : ""}`}
                   onClick={() => toggle(f.user_id)}
                 >
-                  @{f.username}
+                  {f.username}
                 </button>
               ))}
             </div>

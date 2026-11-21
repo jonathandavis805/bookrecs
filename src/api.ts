@@ -913,20 +913,12 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
 
   // ----- notifications -----
   if (path === "/api/notifications" && method === "GET") {
-    const notifications = await core.getNotifications(db, user.id);
-    const unreadCount = await core.getUnreadNotificationCount(db, user.id);
-    return json({ notifications, unreadCount });
+    return json(await core.getNotifications(db, user.id));
   }
 
-  const dismissNotification = path.match(/^\/api\/notifications\/(\d+)\/dismiss$/);
-  if (dismissNotification && method === "POST") {
-    await core.dismissNotification(db, user.id, Number(dismissNotification[1]));
-    return json({ ok: true });
-  }
-
-  if (path === "/api/notifications/dismiss-all" && method === "POST") {
-    await core.dismissAllNotifications(db, user.id);
-    return json({ ok: true });
+  if (path === "/api/notifications/seen" && method === "POST") {
+    await core.markInformationalNotificationsRead(db, user.id);
+    return json(await core.getNotifications(db, user.id));
   }
 
   // ----- user approval (admin) -----
