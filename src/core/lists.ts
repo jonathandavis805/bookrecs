@@ -234,7 +234,7 @@ async function insertWish(db: D1Database, userId: number, bookId: number, opts: 
   if (await onList(db, "wishlist", userId, bookId)) return fail("Already on your wishlist");
   await insertRanked(db, "wishlist", userId, bookId, opts.rank, {
     owned: opts.owned ? 1 : 0,
-    public: opts.isPublic ? 1 : 0,
+    public: opts.isPublic === false ? 0 : 1,
   });
   return { ok: true };
 }
@@ -387,7 +387,7 @@ async function restoreToWishlist(
   return await insertWish(db, userId, bookId, {
     rank: state.wishlist_rank ?? undefined,
     owned: !!state.wishlist_owned,
-    isPublic: !!state.wishlist_public,
+    isPublic: state.wishlist_public !== 0,
   });
 }
 

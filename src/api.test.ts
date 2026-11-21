@@ -280,6 +280,29 @@ describe("friends", () => {
     const detail = (await alice.get(`/api/books/${data.book.id}`)).data.book;
     expect(detail.friends).toEqual([expect.objectContaining({ username: "bob", status: "wishlist" })]);
   });
+
+  test("wishlist items are public unless marked private", async () => {
+    const alice = await signup("alice");
+    const a = (await alice.post("/api/books/manual", manual("A"))).data.book.id;
+    const b = (await alice.post("/api/books/manual", manual("B"))).data.book.id;
+    await alice.del(`/api/me/books/${a}`);
+    await alice.del(`/api/me/books/${b}`);
+    await alice.post("/api/me/wishlist", { book_id: a });
+    const { data } = await alice.post("/api/me/wishlist", { book_id: b, public: false });
+    expect(data.books.map((w: { public: number }) => w.public)).toEqual([1, 0]);
+  });
+
+  test("book detail shows which of my lists the book is on", async () => {
+    const alice = await signup("alice");
+    const { data } = await alice.post("/api/books/manual", { ...manual("Mine"), review: "Loved it" });
+    await alice.post("/api/me/reading", { book_id: data.book.id });
+    const { mine } = (await alice.get(`/api/books/${data.book.id}`)).data.book;
+    expect(mine).toEqual({
+      read: { rank: 1, review: "Loved it", listened: 0, public: 1 },
+      wishlist: null,
+      reading: { listening: 0 },
+    });
+  });
 });
 
 describe("clubs", () => {
