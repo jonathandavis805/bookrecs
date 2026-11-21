@@ -282,8 +282,8 @@ textarea:focus {
 .switch {
   position: relative;
   flex-shrink: 0;
-  width: 38px;
-  height: 22px;
+  width: 32px;
+  height: 18px;
   padding: 0;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
@@ -294,8 +294,8 @@ textarea:focus {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--border-strong);
   transition:
@@ -310,7 +310,7 @@ textarea:focus {
 }
 
 .switch.on .knob {
-  transform: translateX(16px);
+  transform: translateX(14px);
   background: var(--card);
 }
 
@@ -871,9 +871,84 @@ textarea:focus {
   resize: vertical;
 }
 
-.review-toggle,
-.review-row {
+/* Rank, Public and remove on top; the book's details get the full width below. */
+.read-row {
+  display: grid;
+  grid-template-areas:
+    "handle cover rank actions"
+    "handle cover info info";
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.read-row .drag-handle {
+  grid-area: handle;
+}
+
+.read-row .cover {
+  grid-area: cover;
+  align-self: start;
+}
+
+.read-row .rank {
+  grid-area: rank;
+  padding-top: 0;
+}
+
+.read-row .info {
+  grid-area: info;
+}
+
+.read-row .actions-col {
+  grid-area: actions;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.read-row .actions-col .icon-btn {
+  align-self: center;
+}
+
+.read-row .public-col {
+  flex-direction: row;
+  gap: 6px;
+  margin-right: 0;
+}
+
+.read-row .review-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.review-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 5px 10px;
+  white-space: nowrap;
+  border-color: var(--border);
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+
+.review-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+.review-toggle.open svg {
+  transform: rotate(180deg);
+}
+
+.review-box {
   display: none;
+}
+
+.review-box.open {
+  display: block;
 }
 
 .save-review {
@@ -1609,81 +1684,16 @@ textarea:focus {
     margin-right: auto;
   }
 
-  /* Rank, Public and remove on top; the book's details get the full width below. */
   .read-row {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
-    align-items: center;
+    grid-template-areas:
+      "handle rank actions"
+      "handle info info";
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
   }
 
-  .read-row .drag-handle {
-    grid-row: 1 / span 2;
-    grid-column: 1;
-  }
-
-  .read-row .rank {
-    grid-row: 1;
-    grid-column: 2;
-    padding-top: 0;
-  }
-
-  .read-row .info {
-    grid-row: 2;
-    grid-column: 2 / -1;
-  }
-
-  .read-row .actions-col {
-    display: contents;
-  }
-
-  .read-row .public-col {
-    grid-row: 1;
-    grid-column: 3;
-    margin-right: 0;
-  }
-
-  .read-row .actions-col .icon-btn {
-    grid-row: 1;
-    grid-column: 4;
-  }
-
-  .read-row .actions-col .segmented,
   .read-row .actions-col .btn-sm {
     display: none;
-  }
-
-  .review-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-top: 8px;
-  }
-
-  .review-toggle {
-    display: inline-flex;
-    flex-shrink: 0;
-    padding: 5px 10px;
-    white-space: nowrap;
-    border-color: var(--border);
-    color: var(--muted);
-    font-size: var(--font-sm);
-  }
-
-  .review-toggle svg {
-    transition: transform 0.15s ease;
-  }
-
-  .review-toggle.open svg {
-    transform: rotate(180deg);
-  }
-
-  .review-box {
-    display: none;
-  }
-
-  .review-box.open {
-    display: block;
   }
 
   .friend-row-head {

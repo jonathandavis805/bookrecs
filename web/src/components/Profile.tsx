@@ -765,7 +765,6 @@ function ReadItem({
         <Byline author={book.author} year={book.first_publish_year} />
         <OverallRank rank={overall} />
         <CategoryTags categories={categories} ids={book.category_ids} onChange={onSetCategories} />
-        {/* The picker here is the phone one; desktop shows it in the actions column. */}
         <div className="review-row">
           <button
             type="button"
@@ -792,11 +791,6 @@ function ReadItem({
         </div>
       </div>
       <div className="actions actions-col">
-        <div className="public-col">
-          <Switch checked={!!book.public} onChange={onTogglePublic} title="Visible to friends" />
-          <span className="small-label">{book.public ? "Public" : "Private"}</span>
-        </div>
-        <FormatPicker listened={!!book.listened} labels={["Read", "Listened"]} onChange={onSetListened} />
         <button
           type="button"
           className="btn-sm"
@@ -806,6 +800,10 @@ function ReadItem({
         >
           {book.isReading ? <IconCheck /> : <IconBook />} Reading
         </button>
+        <div className="public-col">
+          <Switch checked={!!book.public} onChange={onTogglePublic} title="Visible to friends" />
+          <span className="small-label">{book.public ? "Public" : "Private"}</span>
+        </div>
         <button type="button" className="icon-btn remove" onClick={onRemove} title="Remove" aria-label="Remove">
           <IconX />
         </button>
