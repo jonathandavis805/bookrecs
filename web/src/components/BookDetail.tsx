@@ -88,6 +88,9 @@ export default function BookDetail({ bookId }: { bookId: number }) {
 
   const { mine } = book;
   const onAnyList = mine.read || mine.wishlist || mine.reading;
+  const canStart = !mine.reading;
+  // The server keeps books you've read off the wishlist.
+  const canWish = !mine.read && !mine.wishlist;
   const reviewDirty = review !== (mine.read?.review ?? "");
   const friends = new Map<string, FriendActivity[]>();
   for (const f of book.friends) friends.set(f.username, [...(friends.get(f.username) ?? []), f]);
@@ -160,9 +163,9 @@ export default function BookDetail({ bookId }: { bookId: number }) {
               {mine.wishlist && <WishlistBadge owned={!!mine.wishlist.owned} />}
               {!onAnyList && <span className="muted">Not on your lists yet</span>}
             </div>
-            {!(mine.reading && (mine.read || mine.wishlist)) && (
+            {(canStart || canWish) && (
               <div className="my-list-actions">
-                {!mine.reading && (
+                {canStart && (
                   <button
                     type="button"
                     className="btn-secondary btn-sm"
@@ -173,17 +176,21 @@ export default function BookDetail({ bookId }: { bookId: number }) {
                         : act("/api/me/reading", "POST", { book_id: book.id })
                     }
                   >
-                    <IconBook /> Start reading
+                    <IconBook /> {mine.read ? "Read again" : "Start reading"}
                   </button>
                 )}
-                {!onAnyList && (
+                {canWish && (
                   <button
                     type="button"
                     className="btn-secondary btn-sm"
                     disabled={busy}
-                    onClick={() => act("/api/me/wishlist", "POST", { book_id: book.id })}
+                    onClick={() =>
+                      mine.reading
+                        ? act(`/api/me/reading/${book.id}/back-to-wishlist`, "POST", {})
+                        : act("/api/me/wishlist", "POST", { book_id: book.id })
+                    }
                   >
-                    <IconHeart /> Add to wishlist
+                    <IconHeart /> {mine.reading ? "Move to wishlist" : "Add to wishlist"}
                   </button>
                 )}
               </div>
