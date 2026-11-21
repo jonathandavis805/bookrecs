@@ -44,7 +44,7 @@ bookrecs/
 │  └─ test/         # in-memory D1 for tests (bun test)
 ├─ functions/       # Cloudflare Pages Functions (API entry point)
 ├─ web/             # Vite + React frontend
-├─ scripts/         # MCP launcher, preview seeding, production migration runner
+├─ scripts/         # MCP launcher, preview seeding, migration-history adoption
 ├─ lint/            # project-specific lint rules
 └─ migrations/      # D1 database migrations
 ```
@@ -269,4 +269,4 @@ answer with the updated club detail (`{club}`).
 - Starting a book is one tap: every book on a friend's profile has a "📖 Reading"
   quick action (plus "♡ Wishlist"), and your own wishlist items have a
   "📖 Reading" button to start reading them.
-- Database migrations are in `migrations/` and run automatically on deploy.
+- Database migrations are in `migrations/`, applied with `wrangler d1 migrations apply`: `bun run migrate:local` for local dev, and `bun run migrate:remote` (run by CI on deploy) for production.

@@ -5,16 +5,19 @@ import { createNotification, markNotificationsRead } from "./notifications";
 import { type Failure, fail, forbidden, notFound, type Result } from "./result";
 import { findUser, type User, usernameOf } from "./users";
 
+// nominating -> voting (-> runoff, a second round) -> closed -> nominating ...
+type ClubStage = "nominating" | "voting" | "runoff" | "closed";
+
 export interface ClubRow {
   id: number;
   name: string;
   description: string | null;
   creator_id: number;
-  voting_open: number;
-  nominations_open: number;
-  runoff: number;
+  stage: ClubStage;
   created_at: number;
 }
+
+const isVoting = (club: { stage: ClubStage }) => club.stage === "voting" || club.stage === "runoff";
 
 interface Membership {
   role: "owner" | "member";
@@ -66,8 +69,7 @@ export interface ClubSummary {
   role: "owner" | "member";
   memberCount: number;
   invitedCount: number;
-  voting_open: number;
-  nominations_open: number;
+  stage: ClubStage;
   nominationCount: number;
   currentPick: ClubPickRow | null;
   created_at: number;
@@ -84,9 +86,7 @@ export interface ClubInviteSummary {
 export interface ClubDetail {
   club: ClubRow;
   myRole: "owner" | "member";
-  votingOpen: boolean;
-  nominationsOpen: boolean;
-  runoff: boolean;
+  stage: ClubStage;
   members: ClubMemberRow[];
   nominations: ClubNominationRow[];
   myVote: number | null;
@@ -135,8 +135,8 @@ async function loadClub(
 }
 
 function votingClosed(club: ClubRow, closed = "Voting is closed for the current pick"): Failure | null {
-  if (club.voting_open === 1) return null;
-  return fail(club.nominations_open === 1 ? "Voting hasn't opened yet — the club is still nominating" : closed);
+  if (isVoting(club)) return null;
+  return fail(club.stage === "nominating" ? "Voting hasn't opened yet — the club is still nominating" : closed);
 }
 
 async function clearVote(db: D1Database, clubId: number, userId: number): Promise<void> {
@@ -263,7 +263,7 @@ export async function createClub(
 
   const club = await queryOne<ClubRow>(
     db,
-    "INSERT INTO clubs (name, description, creator_id, voting_open, nominations_open) VALUES (?, ?, ?, 0, 1) RETURNING *",
+    "INSERT INTO clubs (name, description, creator_id) VALUES (?, ?, ?) RETURNING *",
     cleanName,
     cleanDesc,
     creatorId,
@@ -296,7 +296,7 @@ export async function listClubsForUser(
 ): Promise<{ clubs: ClubSummary[]; invites: ClubInviteSummary[] }> {
   const clubs = await queryAll<Omit<ClubSummary, "currentPick">>(
     db,
-    `SELECT c.id, c.name, c.description, c.voting_open, c.nominations_open, c.created_at, m.role,
+    `SELECT c.id, c.name, c.description, c.stage, c.created_at, m.role,
        (SELECT COUNT(*) FROM club_members cm WHERE cm.club_id = c.id AND cm.status = 'accepted') AS memberCount,
        (SELECT COUNT(*) FROM club_members cm WHERE cm.club_id = c.id AND cm.status = 'pending') AS invitedCount,
        (SELECT COUNT(*) FROM club_nominations n WHERE n.club_id = c.id) AS nominationCount
@@ -362,9 +362,7 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
     club: {
       club,
       myRole: membership.role,
-      votingOpen: club.voting_open === 1,
-      nominationsOpen: club.nominations_open === 1,
-      runoff: club.runoff === 1,
+      stage: club.stage,
       members,
       nominations,
       myVote: myVote?.nomination_id ?? null,
@@ -494,11 +492,9 @@ export async function transferClubOwnership(
 export async function nominateBook(db: D1Database, userId: number, clubId: number, ref: BookRef): Promise<Result> {
   const r = await loadClub(db, userId, clubId, "member");
   if (!r.ok) return r;
-  if (r.club.nominations_open !== 1) {
+  if (r.club.stage !== "nominating") {
     return fail(
-      r.club.voting_open === 1
-        ? "Nominations are closed while voting is open"
-        : "Nominations are closed for the current pick",
+      isVoting(r.club) ? "Nominations are closed while voting is open" : "Nominations are closed for the current pick",
     );
   }
   const b = await resolveBook(db, ref);
@@ -669,7 +665,7 @@ export async function closeVote(
   await execute(db, "INSERT INTO club_picks (club_id, book_id) VALUES (?, ?)", clubId, winner.book_id);
   await clearAllVotes(db, clubId);
   await execute(db, "DELETE FROM club_nominations WHERE club_id = ?", clubId);
-  await execute(db, "UPDATE clubs SET voting_open = 0, runoff = 0 WHERE id = ?", clubId);
+  await execute(db, "UPDATE clubs SET stage = 'closed' WHERE id = ?", clubId);
   await notifyMembers(db, r.club, userId, "club_pick", `"${winner.title}" won the vote in "${r.club.name}"`, {
     bookId: winner.book_id,
     bookTitle: winner.title,
@@ -705,7 +701,7 @@ export async function startRunoff(db: D1Database, userId: number, clubId: number
     ...ids,
   );
   await execute(db, `DELETE FROM club_votes WHERE nomination_id IN (${placeholders})`, ...ids);
-  await execute(db, "UPDATE clubs SET runoff = 1 WHERE id = ?", clubId);
+  await execute(db, "UPDATE clubs SET stage = 'runoff' WHERE id = ?", clubId);
 
   const titles = field.map((n) => n.title);
   await notifyMembers(
@@ -723,8 +719,8 @@ export async function startRunoff(db: D1Database, userId: number, clubId: number
 export async function openNominations(db: D1Database, userId: number, clubId: number): Promise<Result> {
   const r = await loadClub(db, userId, clubId, "owner", "start a new cycle");
   if (!r.ok) return r;
-  if (r.club.voting_open === 1 || r.club.nominations_open === 1) return fail("A cycle is already in progress");
-  await execute(db, "UPDATE clubs SET nominations_open = 1, voting_open = 0, runoff = 0 WHERE id = ?", clubId);
+  if (r.club.stage !== "closed") return fail("A cycle is already in progress");
+  await execute(db, "UPDATE clubs SET stage = 'nominating' WHERE id = ?", clubId);
   await notifyMembers(
     db,
     r.club,
@@ -739,11 +735,11 @@ export async function openNominations(db: D1Database, userId: number, clubId: nu
 export async function startVoting(db: D1Database, userId: number, clubId: number): Promise<Result> {
   const r = await loadClub(db, userId, clubId, "owner", "open the vote");
   if (!r.ok) return r;
-  if (r.club.nominations_open !== 1) return fail("The club is not in the nomination stage");
+  if (r.club.stage !== "nominating") return fail("The club is not in the nomination stage");
   if ((await activeNominations(db, clubId)).length === 0) {
     return fail("Nominate at least one book before opening the vote");
   }
-  await execute(db, "UPDATE clubs SET nominations_open = 0, voting_open = 1 WHERE id = ?", clubId);
+  await execute(db, "UPDATE clubs SET stage = 'voting' WHERE id = ?", clubId);
   await notifyMembers(db, r.club, userId, "club_voting_open", `Voting is open in "${r.club.name}" — cast your vote!`);
   return { ok: true };
 }
@@ -754,9 +750,9 @@ export async function startVoting(db: D1Database, userId: number, clubId: number
 export async function backToNominations(db: D1Database, userId: number, clubId: number): Promise<Result> {
   const r = await loadClub(db, userId, clubId, "owner", "reset the vote");
   if (!r.ok) return r;
-  if (r.club.voting_open !== 1) return fail("Voting is not open");
+  if (!isVoting(r.club)) return fail("Voting is not open");
   await clearAllVotes(db, clubId);
-  await execute(db, "UPDATE clubs SET nominations_open = 1, voting_open = 0, runoff = 0 WHERE id = ?", clubId);
+  await execute(db, "UPDATE clubs SET stage = 'nominating' WHERE id = ?", clubId);
   await notifyMembers(
     db,
     r.club,
@@ -769,13 +765,12 @@ export async function backToNominations(db: D1Database, userId: number, clubId: 
 
 // Cheap change detection for the live club stream: the string shifts any
 // time something visible on the club page changes (club, stage, membership,
-// roles, nominations, vetoes, votes, picks, runoff state). One query per check.
+// roles, nominations, vetoes, votes, picks). One query per check.
 export async function getClubVersion(db: D1Database, clubId: number): Promise<string> {
   const row = await queryOne<{ c: string }>(
     db,
     `SELECT
-       (SELECT COUNT(*) || '-' || COALESCE(MAX(runoff), 0) || '-' || COALESCE(MAX(voting_open), 0) || '-' ||
-               COALESCE(MAX(nominations_open), 0) FROM clubs WHERE id = ?1) || '-' ||
+       (SELECT COUNT(*) || '-' || COALESCE(MAX(stage), '') FROM clubs WHERE id = ?1) || '-' ||
        (SELECT COUNT(*) || '-' || COALESCE(SUM(role = 'owner'), 0) || '-' || COALESCE(SUM(status = 'accepted'), 0)
           FROM club_members WHERE club_id = ?1) || '-' ||
        (SELECT COUNT(*) || '-' || COUNT(vetoed_by) || '-' || COALESCE(MAX(created_at), 0)

@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type ClubInvite, type ClubSummary, errorMessage } from "../api";
+import { api, type ClubInvite, type ClubStage, type ClubSummary, errorMessage } from "../api";
 import { IconChevronRight } from "./ui/icons";
+
+const STAGE_LABEL: Record<ClubStage, string> = {
+  nominating: "Nominating",
+  voting: "Voting open",
+  runoff: "Runoff vote",
+  closed: "",
+};
 
 export default function Clubs({ refreshKey, onClubsChanged }: { refreshKey: number; onClubsChanged: () => void }) {
   const [clubs, setClubs] = useState<ClubSummary[]>([]);
@@ -107,15 +114,8 @@ export default function Clubs({ refreshKey, onClubsChanged }: { refreshKey: numb
                   <div className="author">
                     {c.memberCount} member{c.memberCount === 1 ? "" : "s"}
                     {c.invitedCount > 0 && ` · ${c.invitedCount} invited`}
-                    {c.voting_open === 1
-                      ? c.nominationCount > 0
-                        ? ` · Voting open · ${c.nominationCount} nominated`
-                        : " · Voting open · no nominations yet"
-                      : c.nominations_open === 1
-                        ? c.nominationCount > 0
-                          ? ` · Nominating · ${c.nominationCount} nominated`
-                          : " · Nominating · no nominations yet"
-                        : ""}
+                    {STAGE_LABEL[c.stage] &&
+                      ` · ${STAGE_LABEL[c.stage]} · ${c.nominationCount > 0 ? `${c.nominationCount} nominated` : "no nominations yet"}`}
                   </div>
                   {c.currentPick && (
                     <div className="club-current-pick">

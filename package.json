@@ -8,6 +8,7 @@
     "dev:web": "cd web && bun run dev",
     "build": "cd web && bun run build",
     "migrate:local": "wrangler d1 migrations apply bookrecs-db --local",
+    "migrate:remote": "wrangler d1 execute bookrecs-db --remote --yes --file scripts/adopt-d1-migrations.sql && wrangler d1 migrations apply bookrecs-db --remote",
     "mcp": "bun run src/mcp.ts",
     "seed:preview": "bun scripts/seed-preview.ts",
     "preview": "bun run build && bun run migrate:local && wrangler pages dev",

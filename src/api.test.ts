@@ -202,7 +202,7 @@ describe("clubs", () => {
     expect((await alice.post(`/api/clubs/${clubId}/close-vote`)).status).toBe(200);
     const club = (await alice.get(`/api/clubs/${clubId}`)).data.club;
     expect(club.currentPick.title).toBe("X");
-    expect(club.votingOpen).toBe(false);
+    expect(club.stage).toBe("closed");
   });
 
   test("a tie needs a runoff, which then resolves", async () => {
@@ -218,6 +218,7 @@ describe("clubs", () => {
     expect(tie.data.runoffNeeded).toBe(true);
 
     await alice.post(`/api/clubs/${clubId}/runoff`);
+    expect((await alice.get(`/api/clubs/${clubId}`)).data.club.stage).toBe("runoff");
     expect(titles(await nominations(alice, clubId))).toEqual(["X", "Y"]);
     for (const u of [alice, carol]) await u.post(`/api/clubs/${clubId}/vote`, { nominationId: y.id });
     expect((await alice.post(`/api/clubs/${clubId}/close-vote`)).status).toBe(200);

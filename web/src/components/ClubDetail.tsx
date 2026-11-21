@@ -36,7 +36,7 @@ function BackToClubs() {
 
 // The runoff field: the top two vote-getters. A tie at the top keeps all
 // tied leaders; a single leader is joined by whoever ties for second.
-// Mirrors runoffField in src/core.ts.
+// Mirrors runoffField in src/core/clubs.ts.
 function runoffField<T extends { votes: number }>(nominations: T[]): T[] {
   if (nominations.length === 0) return [];
   const topVotes = Math.max(...nominations.map((n) => n.votes));
@@ -161,6 +161,9 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   }
 
   const isOwner = data.myRole === "owner";
+  const nominating = data.stage === "nominating";
+  const runoff = data.stage === "runoff";
+  const voting = data.stage === "voting" || runoff;
   const transferCandidates = data.members.filter((m) => m.status === "accepted" && m.role !== "owner");
   const activeNominations = data.nominations.filter((n) => n.vetoed_by == null);
   // A tie at the top (books sharing the lead with at least one vote).
@@ -354,9 +357,9 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
 
       <section className="club-section">
         <h3 className="section-title">
-          {data.nominationsOpen ? "Nominate the next book" : data.votingOpen ? "Vote for the next book" : "Voting"}
+          {nominating ? "Nominate the next book" : voting ? "Vote for the next book" : "Voting"}
         </h3>
-        {!data.votingOpen && !data.nominationsOpen && (
+        {!voting && !nominating && (
           <div className="club-closed-row">
             <span className="muted">Voting is closed. The winner is shown above as the current read.</span>
             {isOwner && (
@@ -367,7 +370,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
           </div>
         )}
 
-        {data.nominationsOpen && (
+        {nominating && (
           <>
             {isOwner && (
               <div className="club-owner-actions">
@@ -416,7 +419,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
           </>
         )}
 
-        {data.votingOpen && (
+        {voting && (
           <>
             {isOwner && (
               <div className="club-owner-actions">
@@ -437,7 +440,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                           : "Majority wins"
                   }
                 >
-                  {data.runoff ? "Close runoff & pick winner" : "Close voting & pick winner"}
+                  {runoff ? "Close runoff & pick winner" : "Close voting & pick winner"}
                 </button>
                 <button
                   type="button"
@@ -450,7 +453,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
               </div>
             )}
 
-            {data.runoff && (
+            {runoff && (
               <div className="club-runoff-banner">
                 <IconClock size={18} />
                 <span>
@@ -637,8 +640,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
           onConfirm={backToNominations}
           onCancel={() => setShowResetVote(false)}
         >
-          All cast votes are cleared{data.runoff ? " and the runoff ends" : ""}, and the club goes back to the
-          nomination stage. Nominations stay so the field can be adjusted before voting again.
+          All cast votes are cleared{runoff ? " and the runoff ends" : ""}, and the club goes back to the nomination
+          stage. Nominations stay so the field can be adjusted before voting again.
         </ConfirmDialog>
       )}
 
