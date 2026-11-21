@@ -68,6 +68,7 @@ export interface NextUpItem extends WishlistItem {
 
 export interface ReadingItem {
   book_id: number;
+  listening: number;
   created_at: number;
   id: number;
   ol_key: string;

@@ -24,6 +24,7 @@ export interface WishlistRow extends BookRow {
 
 export interface ReadingRow extends BookRow {
   book_id: number;
+  listening: number;
   created_at: number;
 }
 
@@ -150,6 +151,7 @@ interface ReadOptions {
   review?: string;
   rank?: number;
   isPublic?: boolean;
+  listened?: boolean;
 }
 
 async function insertRead(db: D1Database, userId: number, bookId: number, opts: ReadOptions = {}): Promise<Result> {
@@ -157,6 +159,7 @@ async function insertRead(db: D1Database, userId: number, bookId: number, opts: 
   await insertRanked(db, "reads", userId, bookId, opts.rank, {
     review: opts.review ?? null,
     public: opts.isPublic === false ? 0 : 1,
+    listened: opts.listened ? 1 : 0,
   });
   return { ok: true };
 }
@@ -312,7 +315,7 @@ export async function getNextUp(db: D1Database, userId: number): Promise<NextUpR
 export async function listReading(db: D1Database, userId: number): Promise<ReadingRow[]> {
   return await queryAll<ReadingRow>(
     db,
-    `SELECT r.book_id, r.created_at, ${BOOK_COLUMNS}
+    `SELECT r.book_id, r.listening, r.created_at, ${BOOK_COLUMNS}
      FROM reading r JOIN books b ON b.id = r.book_id
      WHERE r.user_id = ? ORDER BY r.created_at DESC, r.book_id DESC`,
     userId,
@@ -405,13 +408,35 @@ export async function finishReading(
   bookId: number,
   opts: ReadOptions = {},
 ): Promise<Result> {
-  if (!(await onList(db, "reading", userId, bookId))) return notFound("Not currently reading");
+  const reading = await queryOne<{ listening: number }>(
+    db,
+    "SELECT listening FROM reading WHERE user_id = ? AND book_id = ?",
+    userId,
+    bookId,
+  );
+  if (!reading) return notFound("Not currently reading");
   if (!(await onList(db, "reads", userId, bookId))) {
-    const r = await insertRead(db, userId, bookId, opts);
+    const r = await insertRead(db, userId, bookId, { ...opts, listened: reading.listening === 1 });
     if (!r.ok) return r;
   }
   await deleteReading(db, userId, bookId);
   return { ok: true };
+}
+
+export async function setListening(
+  db: D1Database,
+  userId: number,
+  bookId: number,
+  listening: boolean,
+): Promise<Result> {
+  const r = await execute(
+    db,
+    "UPDATE reading SET listening = ? WHERE user_id = ? AND book_id = ?",
+    listening ? 1 : 0,
+    userId,
+    bookId,
+  );
+  return r.meta.changes ? { ok: true } : notFound("Not currently reading");
 }
 
 export async function backToWishlist(db: D1Database, userId: number, bookId: number): Promise<Result> {

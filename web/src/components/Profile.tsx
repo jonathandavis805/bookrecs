@@ -226,6 +226,18 @@ export default function Profile({ username, me }: Props) {
     }
   }
 
+  async function setListening(bookId: number, next: boolean) {
+    setReading((r) => (r ? r.map((x) => (x.book_id === bookId ? { ...x, listening: next ? 1 : 0 } : x)) : r));
+    try {
+      await api(`/api/me/reading/${bookId}/listening`, {
+        method: "POST",
+        body: JSON.stringify({ listening: next }),
+      });
+    } catch (e) {
+      setReadError(errorMessage(e));
+    }
+  }
+
   async function backToWishlist(item: ReadingItem) {
     try {
       await api(`/api/me/reading/${item.book_id}/back-to-wishlist`, { method: "POST", body: "{}" });
@@ -418,8 +430,18 @@ export default function Profile({ username, me }: Props) {
                         {b.title}
                       </a>
                       {b.manual ? <span className="badge">manual</span> : null}
+                      {!isSelf && b.listening ? <span className="badge">Listening</span> : null}
                     </div>
                     <Byline author={b.author} year={b.first_publish_year} />
+                    {isSelf && (
+                      <div className="toggle-row">
+                        <FormatPicker
+                          listened={!!b.listening}
+                          labels={["Reading", "Listening"]}
+                          onChange={(next) => setListening(b.book_id, next)}
+                        />
+                      </div>
+                    )}
                   </div>
                   {isSelf ? (
                     <div className="actions">
@@ -648,6 +670,32 @@ export default function Profile({ username, me }: Props) {
 
 const DRAGGING = { scale: 1.02, zIndex: 10, boxShadow: "0 12px 28px rgba(0,0,0,0.15)" };
 
+function FormatPicker({
+  listened,
+  labels,
+  onChange,
+}: {
+  listened: boolean;
+  labels: [read: string, listened: string];
+  onChange: (listened: boolean) => void;
+}) {
+  return (
+    <div className="segmented compact">
+      {[false, true].map((value) => (
+        <button
+          key={String(value)}
+          type="button"
+          className={listened === value ? "active" : ""}
+          aria-pressed={listened === value}
+          onClick={() => onChange(value)}
+        >
+          {labels[value ? 1 : 0]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function OverallRank({ rank }: { rank?: number }) {
   return rank ? <div className="small-label">#{rank} overall</div> : null;
 }
@@ -692,7 +740,7 @@ function ReadItem({
       as="li"
       dragListener={false}
       dragControls={controls}
-      className="book-row"
+      className="book-row read-row"
       whileDrag={DRAGGING}
     >
       <button
@@ -717,14 +765,18 @@ function ReadItem({
         <Byline author={book.author} year={book.first_publish_year} />
         <OverallRank rank={overall} />
         <CategoryTags categories={categories} ids={book.category_ids} onChange={onSetCategories} />
-        <button
-          type="button"
-          className={`review-toggle${reviewOpen ? " open" : ""}`}
-          onClick={() => setReviewOpen((o) => !o)}
-        >
-          {reviewOpen ? "Hide review" : review.trim() ? "Edit review" : "Add review"}
-          <IconChevronDown size={12} />
-        </button>
+        {/* The picker here is the phone one; desktop shows it in the actions column. */}
+        <div className="review-row">
+          <button
+            type="button"
+            className={`review-toggle${reviewOpen ? " open" : ""}`}
+            onClick={() => setReviewOpen((o) => !o)}
+          >
+            {reviewOpen ? "Hide review" : review.trim() ? "Edit review" : "Add review"}
+            <IconChevronDown size={12} />
+          </button>
+          <FormatPicker listened={!!book.listened} labels={["Read", "Listened"]} onChange={onSetListened} />
+        </div>
         <div className={`review-box${reviewOpen ? " open" : ""}`}>
           <textarea
             className="review"
@@ -744,19 +796,7 @@ function ReadItem({
           <Switch checked={!!book.public} onChange={onTogglePublic} title="Visible to friends" />
           <span className="small-label">{book.public ? "Public" : "Private"}</span>
         </div>
-        <div className="segmented compact">
-          {[false, true].map((listened) => (
-            <button
-              key={String(listened)}
-              type="button"
-              className={!!book.listened === listened ? "active" : ""}
-              aria-pressed={!!book.listened === listened}
-              onClick={() => onSetListened(listened)}
-            >
-              {listened ? "Listened" : "Read"}
-            </button>
-          ))}
-        </div>
+        <FormatPicker listened={!!book.listened} labels={["Read", "Listened"]} onChange={onSetListened} />
         <button
           type="button"
           className="btn-sm"

@@ -43,7 +43,7 @@ export async function listFriendsWithReading(db: D1Database, userId: number): Pr
   const rows = await queryAll<ReadingRow & { user_id: number }>(
     db,
     `SELECT * FROM (
-       SELECT r.user_id, r.book_id, r.created_at, ${BOOK_COLUMNS},
+       SELECT r.user_id, r.book_id, r.listening, r.created_at, ${BOOK_COLUMNS},
               ROW_NUMBER() OVER (PARTITION BY r.user_id ORDER BY r.created_at DESC, r.book_id DESC) AS rn
        FROM reading r JOIN books b ON b.id = r.book_id
        WHERE r.user_id IN (${FRIEND_IDS})

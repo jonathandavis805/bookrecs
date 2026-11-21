@@ -244,6 +244,17 @@ describe("listened", () => {
     await befriend(alice, bob, "bob");
     expect((await bob.get("/api/friends/alice/books")).data.books[0].listened).toBe(1);
   });
+
+  test("a book being listened to is finished as listened", async () => {
+    const alice = await signup("alice");
+    const id = (await alice.post("/api/me/reading/manual", manual("Dune"))).data.book.id;
+    expect((await alice.post("/api/me/reading/999/listening", { listening: true })).status).toBe(404);
+    const { data } = await alice.post(`/api/me/reading/${id}/listening`, { listening: true });
+    expect(data.books[0].listening).toBe(1);
+
+    await alice.post(`/api/me/reading/${id}/finish`);
+    expect((await alice.get("/api/me/books")).data.books[0].listened).toBe(1);
+  });
 });
 
 describe("friends", () => {

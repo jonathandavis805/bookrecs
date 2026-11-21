@@ -476,6 +476,13 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     if (category_ids) await core.setBookCategories(db, user.id, bookId, idList(category_ids));
     return json({ ok: true, ...(await lists()) });
   }
+  const readingListening = path.match(/^\/api\/me\/reading\/(\d+)\/listening$/);
+  if (readingListening && method === "POST") {
+    const body = await readBody(req);
+    const r = await core.setListening(db, user.id, Number(readingListening[1]), !!body.listening);
+    if (!r.ok) return failure(r);
+    return json({ books: await core.listReading(db, user.id) });
+  }
   const readingBack = path.match(/^\/api\/me\/reading\/(\d+)\/back-to-wishlist$/);
   if (readingBack && method === "POST") {
     const r = await core.backToWishlist(db, user.id, Number(readingBack[1]));
