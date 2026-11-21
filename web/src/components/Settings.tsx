@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { api } from "../api";
+import { api, errorMessage } from "../api";
+import { Modal } from "./ui/Modal";
 
 export default function Settings({ onClose }: { onClose: () => void }) {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -32,75 +33,63 @@ export default function Settings({ onClose }: { onClose: () => void }) {
       setSuccess(true);
       setTimeout(onClose, 1500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to change password");
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>Settings</h2>
-          <button className="modal-close" onClick={onClose}>×</button>
+    <Modal title="Change password" onClose={onClose}>
+      {success ? (
+        <div className="modal-body">
+          <div className="success">Password changed.</div>
         </div>
+      ) : (
+        <form className="modal-body" onSubmit={handleSubmit}>
+          <label className="field">
+            Current password
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+              autoFocus
+            />
+          </label>
+          <label className="field">
+            New password
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+          </label>
+          <label className="field">
+            Confirm new password
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+          </label>
 
-        {success ? (
-          <div className="success-message">
-            ✓ Password changed successfully!
+          {error && <div className="error">{error}</div>}
+
+          <div className="form-actions">
+            <button type="button" className="btn-secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" disabled={loading}>
+              {loading ? "Changing…" : "Change password"}
+            </button>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label htmlFor="current-password">Current Password</label>
-              <input
-                id="current-password"
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                required
-                autoFocus
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="new-password">New Password</label>
-              <input
-                id="new-password"
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-                minLength={8}
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="confirm-password">Confirm New Password</label>
-              <input
-                id="confirm-password"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                minLength={8}
-              />
-            </div>
-
-            {error && <div className="error-message">{error}</div>}
-
-            <div className="form-actions">
-              <button type="button" className="btn-secondary" onClick={onClose}>
-                Cancel
-              </button>
-              <button type="submit" className="btn-primary" disabled={loading}>
-                {loading ? "Changing..." : "Change Password"}
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
+        </form>
+      )}
+    </Modal>
   );
 }

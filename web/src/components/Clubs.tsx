@@ -1,36 +1,30 @@
-import { useEffect, useState } from "react";
-import { api, ClubSummary, ClubInvite, User } from "../api";
+import { useCallback, useEffect, useState } from "react";
+import { api, type ClubInvite, type ClubSummary, errorMessage } from "../api";
+import { IconChevronRight } from "./ui/icons";
 
-export default function Clubs({
-  user,
-  refreshKey,
-  onClubsChanged,
-}: {
-  user: User;
-  refreshKey: number;
-  onClubsChanged: () => void;
-}) {
+export default function Clubs({ refreshKey, onClubsChanged }: { refreshKey: number; onClubsChanged: () => void }) {
   const [clubs, setClubs] = useState<ClubSummary[]>([]);
   const [invites, setInvites] = useState<ClubInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const d = await api<{ clubs: ClubSummary[]; invites: ClubInvite[] }>("/api/clubs");
       setClubs(d.clubs);
       setInvites(d.invites);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a refetch trigger
   useEffect(() => {
     load();
-  }, [refreshKey]);
+  }, [load, refreshKey]);
 
   async function respond(clubId: number, accept: boolean) {
     setError("");
@@ -45,8 +39,8 @@ export default function Clubs({
       // bell count (and any other panels) right away instead of waiting
       // for the 30s poll.
       onClubsChanged();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
     }
   }
 
@@ -60,7 +54,7 @@ export default function Clubs({
         <h2>Clubs</h2>
         <p className="muted">Read together: nominate books, vote, and pick your next read.</p>
         {!showCreate && (
-          <button className="btn-primary" onClick={() => setShowCreate(true)}>
+          <button type="button" className="btn-primary" onClick={() => setShowCreate(true)}>
             Start a club
           </button>
         )}
@@ -69,23 +63,21 @@ export default function Clubs({
       {error && <div className="error">{error}</div>}
 
       {invites.length > 0 && (
-        <section className="club-invites">
+        <section>
           <h3 className="section-title">Club invites</h3>
           <ul className="plain-list">
             {invites.map((inv) => (
-              <li key={inv.clubId} className="club-invite-row">
+              <li key={inv.clubId} className="row club-invite-row">
                 <div className="info">
                   <div className="title">{inv.name}</div>
-                  <div className="author">
-                    Invited by {inv.inviter ? `@${inv.inviter}` : "a friend"}
-                  </div>
+                  <div className="author">Invited by {inv.inviter ? `@${inv.inviter}` : "a friend"}</div>
                 </div>
                 <div className="actions">
-                  <button className="btn-small btn-success" onClick={() => respond(inv.clubId, true)}>
-                    Accept
-                  </button>
-                  <button className="btn-small btn-danger" onClick={() => respond(inv.clubId, false)}>
+                  <button type="button" className="btn-secondary btn-sm" onClick={() => respond(inv.clubId, false)}>
                     Decline
+                  </button>
+                  <button type="button" className="btn-primary btn-sm" onClick={() => respond(inv.clubId, true)}>
+                    Accept
                   </button>
                 </div>
               </li>
@@ -95,7 +87,7 @@ export default function Clubs({
       )}
 
       {loading ? (
-        <div className="empty">Loading…</div>
+        <div className="loading">Loading…</div>
       ) : clubs.length === 0 && invites.length === 0 ? (
         <div className="empty">
           <p>No clubs yet.</p>
@@ -104,43 +96,35 @@ export default function Clubs({
       ) : (
         <ul className="plain-list club-list">
           {clubs.map((c) => (
-            <li key={c.id} className="club-card" onClick={() => openClub(c.id)}>
-              <div className="club-card-main">
-                <div className="title">
-                  {c.name}
-                  {c.role === "owner" && <span className="badge owner-badge">Owner</span>}
-                </div>
-                {c.description && <div className="author">{c.description}</div>}
-                <div className="author">
-                  {c.memberCount} member{c.memberCount === 1 ? "" : "s"}
-                  {c.invitedCount > 0 && ` · ${c.invitedCount} invited`}
-                  {c.voting_open === 1
-                    ? c.nominationCount > 0
-                      ? ` · Voting open · ${c.nominationCount} nominated`
-                      : " · Voting open · no nominations yet"
-                    : c.nominations_open === 1
-                    ? c.nominationCount > 0
-                      ? ` · Nominating · ${c.nominationCount} nominated`
-                      : " · Nominating · no nominations yet"
-                    : ""}
-                </div>
-                {c.currentPick && (
-                  <div className="club-current-pick">
-                    <span className="muted">Now reading:</span> {c.currentPick.title}
+            <li key={c.id}>
+              <a className="club-card" href={`#/club/${c.id}`}>
+                <div className="club-card-main">
+                  <div className="title">
+                    {c.name}
+                    {c.role === "owner" && <span className="badge">Owner</span>}
                   </div>
-                )}
-              </div>
-              <svg
-                className="club-chevron"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M9 6l6 6-6 6" />
-              </svg>
+                  {c.description && <div className="author">{c.description}</div>}
+                  <div className="author">
+                    {c.memberCount} member{c.memberCount === 1 ? "" : "s"}
+                    {c.invitedCount > 0 && ` · ${c.invitedCount} invited`}
+                    {c.voting_open === 1
+                      ? c.nominationCount > 0
+                        ? ` · Voting open · ${c.nominationCount} nominated`
+                        : " · Voting open · no nominations yet"
+                      : c.nominations_open === 1
+                        ? c.nominationCount > 0
+                          ? ` · Nominating · ${c.nominationCount} nominated`
+                          : " · Nominating · no nominations yet"
+                        : ""}
+                  </div>
+                  {c.currentPick && (
+                    <div className="club-current-pick">
+                      <span className="muted">Now reading:</span> {c.currentPick.title}
+                    </div>
+                  )}
+                </div>
+                <IconChevronRight size={20} className="club-chevron" />
+              </a>
             </li>
           ))}
         </ul>
@@ -148,7 +132,6 @@ export default function Clubs({
 
       {showCreate && (
         <CreateClub
-          user={user}
           onDone={(clubId) => {
             setShowCreate(false);
             if (clubId) openClub(clubId);
@@ -160,7 +143,7 @@ export default function Clubs({
   );
 }
 
-function CreateClub({ user, onDone }: { user: User; onDone: (clubId: number | null) => void }) {
+function CreateClub({ onDone }: { onDone: (clubId: number | null) => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [friends, setFriends] = useState<{ user_id: number; username: string }[]>([]);
@@ -197,18 +180,18 @@ function CreateClub({ user, onDone }: { user: User; onDone: (clubId: number | nu
         }),
       });
       onDone(d.club.id);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
       setBusy(false);
     }
   }
 
   return (
-    <section className="manual-section">
-      <h3>Start a club</h3>
+    <section className="form-section">
+      <h3 className="section-title">Start a club</h3>
       {error && <div className="error">{error}</div>}
-      <form className="manual-form" onSubmit={submit}>
-        <label>
+      <form className="card form" onSubmit={submit}>
+        <label className="field">
           Club name
           <input
             value={name}
@@ -219,7 +202,7 @@ function CreateClub({ user, onDone }: { user: User; onDone: (clubId: number | nu
             autoFocus
           />
         </label>
-        <label>
+        <label className="field">
           Description (optional)
           <textarea
             value={description}
@@ -230,14 +213,14 @@ function CreateClub({ user, onDone }: { user: User; onDone: (clubId: number | nu
           />
         </label>
         {friends.length > 0 ? (
-          <div className="form-field">
-            <span className="small-label">Invite friends</span>
-            <div className="club-friend-picker">
+          <div className="field">
+            <span className="field-label">Invite friends</span>
+            <div className="chip-picker">
               {friends.map((f) => (
                 <button
                   type="button"
                   key={f.user_id}
-                  className={"club-friend-chip" + (picked.has(f.user_id) ? " picked" : "")}
+                  className={`chip${picked.has(f.user_id) ? " picked" : ""}`}
                   onClick={() => toggle(f.user_id)}
                 >
                   @{f.username}

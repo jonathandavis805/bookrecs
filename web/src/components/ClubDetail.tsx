@@ -1,6 +1,17 @@
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { api, User, ClubDetailData, ClubMember, ClubNomination, SearchHit } from "../api";
+import { useCallback, useEffect, useState } from "react";
+import {
+  api,
+  type ClubDetailData,
+  type ClubMember,
+  type ClubNomination,
+  errorMessage,
+  type SearchHit,
+  type User,
+} from "../api";
+import { Byline, Cover } from "./ui/Book";
+import { IconChevronLeft, IconClock, IconThumbsUp, IconX } from "./ui/icons";
+import { ConfirmDialog, Modal } from "./ui/Modal";
 
 function goBackToClubs() {
   // Arrived from inside the app (the clubs list)? Go back so the browser
@@ -15,10 +26,8 @@ function goBackToClubs() {
 function BackToClubs() {
   return (
     <div className="club-back">
-      <button className="link" onClick={goBackToClubs} title="Back to clubs">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-          <path d="M15 18l-6-6 6-6" />
-        </svg>
+      <button type="button" className="link" onClick={goBackToClubs} title="Back to clubs">
+        <IconChevronLeft />
         Clubs
       </button>
     </div>
@@ -59,24 +68,27 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const [runoffBusy, setRunoffBusy] = useState(false);
   const [showResetVote, setShowResetVote] = useState(false);
 
-  async function load(background = false) {
-    try {
-      const d = await api<{ club: ClubDetailData }>(`/api/clubs/${clubId}`);
-      setData(d.club);
-      setError("");
-    } catch (e: any) {
-      // A background poll shouldn't tear down the page on a transient
-      // blip — but losing your membership or the club itself is a real
-      // state change worth surfacing immediately.
-      const gone = /not a member|haven't joined|Club not found/i.test(e.message ?? "");
-      if (!background || gone) {
-        setError(e.message);
-        setData(null);
+  const load = useCallback(
+    async (background = false) => {
+      try {
+        const d = await api<{ club: ClubDetailData }>(`/api/clubs/${clubId}`);
+        setData(d.club);
+        setError("");
+      } catch (e) {
+        // A background poll shouldn't tear down the page on a transient
+        // blip — but losing your membership or the club itself is a real
+        // state change worth surfacing immediately.
+        const gone = /not a member|haven't joined|Club not found/i.test(errorMessage(e));
+        if (!background || gone) {
+          setError(errorMessage(e));
+          setData(null);
+        }
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+    [clubId],
+  );
 
   useEffect(() => {
     load();
@@ -128,13 +140,13 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       es.close();
       if (poll) clearInterval(poll);
     };
-  }, [clubId]);
+  }, [clubId, load]);
 
   if (loading) {
     return (
       <div className="page">
         <BackToClubs />
-        <div className="empty">Loading…</div>
+        <div className="loading">Loading…</div>
       </div>
     );
   }
@@ -149,9 +161,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   }
 
   const isOwner = data.myRole === "owner";
-  const transferCandidates = data.members.filter(
-    (m) => m.status === "accepted" && m.role !== "owner"
-  );
+  const transferCandidates = data.members.filter((m) => m.status === "accepted" && m.role !== "owner");
   const activeNominations = data.nominations.filter((n) => n.vetoed_by == null);
   // A tie at the top (books sharing the lead with at least one vote).
   const topVotes = activeNominations.reduce((m, n) => Math.max(m, n.votes), 0);
@@ -166,18 +176,18 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   // they only move when a count actually changes), vetoed nominations sink
   // to the bottom.
   const sortedNominations = [...activeNominations]
-    .sort((a, b) => (b.votes - a.votes) || (a.created_at - b.created_at) || (a.id - b.id))
+    .sort((a, b) => b.votes - a.votes || a.created_at - b.created_at || a.id - b.id)
     .concat(data.nominations.filter((n) => n.vetoed_by != null));
 
-  async function act(fn: () => Promise<any>, message?: string) {
+  async function act(fn: () => Promise<unknown>, message?: string) {
     setError("");
     setInfo("");
     try {
       await fn();
       if (message) setInfo(message);
       await load();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
     }
   }
 
@@ -186,7 +196,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       api(`/api/clubs/${clubId}/vote`, {
         method: "POST",
         body: JSON.stringify({ nominationId }),
-      })
+      }),
     );
   }
 
@@ -204,8 +214,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       });
       setVetoTarget(null);
       await load();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setVetoBusy(false);
     }
@@ -218,8 +228,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       await api(`/api/clubs/${clubId}/nominations/${removeTarget.id}`, { method: "DELETE" });
       setRemoveTarget(null);
       await load();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setRemoveBusy(false);
     }
@@ -242,24 +252,33 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       setShowRunoff(false);
       setInfo("Runoff started — votes reset for the runoff books.");
       await load();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setRunoffBusy(false);
     }
   }
 
   async function openNominations() {
-    await act(() => api(`/api/clubs/${clubId}/open-nominations`, { method: "POST" }), "Nominations are open for the next pick.");
+    await act(
+      () => api(`/api/clubs/${clubId}/open-nominations`, { method: "POST" }),
+      "Nominations are open for the next pick.",
+    );
   }
 
   async function startVoting() {
-    await act(() => api(`/api/clubs/${clubId}/start-voting`, { method: "POST" }), "Voting is open — nominations are locked.");
+    await act(
+      () => api(`/api/clubs/${clubId}/start-voting`, { method: "POST" }),
+      "Voting is open — nominations are locked.",
+    );
   }
 
   async function backToNominations() {
     setShowResetVote(false);
-    await act(() => api(`/api/clubs/${clubId}/back-to-nominations`, { method: "POST" }), "Voting reset — back to nominations.");
+    await act(
+      () => api(`/api/clubs/${clubId}/back-to-nominations`, { method: "POST" }),
+      "Voting reset — back to nominations.",
+    );
   }
 
   async function removeMember(userId: number) {
@@ -271,8 +290,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
     try {
       await api(`/api/clubs/${clubId}/leave`, { method: "POST" });
       window.location.hash = "#/clubs";
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
       setLeaveBusy(false);
       setShowMemberLeave(false);
     }
@@ -298,8 +317,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         body: JSON.stringify({ userId: transferTarget }),
       });
       window.location.hash = "#/clubs";
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
       setTransferBusy(false);
     }
   }
@@ -313,8 +332,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
     try {
       await api(`/api/clubs/${clubId}`, { method: "DELETE" });
       window.location.hash = "#/clubs";
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
       setDeleteBusy(false);
       setShowDelete(false);
     }
@@ -329,7 +348,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       </div>
 
       {error && <div className="error">{error}</div>}
-      {info && <div className="info">{info}</div>}
+      {info && <div className="success">{info}</div>}
 
       {data.currentPick && <CurrentPick pick={data.currentPick} />}
 
@@ -339,11 +358,9 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         </h3>
         {!data.votingOpen && !data.nominationsOpen && (
           <div className="club-closed-row">
-            <span className="muted">
-              Voting is closed. The winner is shown above as the current read.
-            </span>
+            <span className="muted">Voting is closed. The winner is shown above as the current read.</span>
             {isOwner && (
-              <button className="btn-primary" onClick={openNominations}>
+              <button type="button" className="btn-primary" onClick={openNominations}>
                 Start nominations
               </button>
             )}
@@ -355,6 +372,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
             {isOwner && (
               <div className="club-owner-actions">
                 <button
+                  type="button"
                   className="btn-primary"
                   onClick={startVoting}
                   disabled={activeNominations.length === 0}
@@ -403,6 +421,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
             {isOwner && (
               <div className="club-owner-actions">
                 <button
+                  type="button"
                   className="btn-primary"
                   onClick={closeVote}
                   disabled={activeNominations.length === 0 || activeNominations.every((n) => n.votes === 0)}
@@ -412,16 +431,17 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                         ? "Every nomination was vetoed"
                         : "Nominate at least one book first"
                       : needsRunoff
-                      ? "No majority yet — a runoff will resolve it"
-                      : activeNominations.every((n) => n.votes === 0)
-                      ? "Waiting for votes"
-                      : "Majority wins"
+                        ? "No majority yet — a runoff will resolve it"
+                        : activeNominations.every((n) => n.votes === 0)
+                          ? "Waiting for votes"
+                          : "Majority wins"
                   }
                 >
                   {data.runoff ? "Close runoff & pick winner" : "Close voting & pick winner"}
                 </button>
                 <button
-                  className="secondary"
+                  type="button"
+                  className="btn-secondary"
                   onClick={() => setShowResetVote(true)}
                   title="Clear all votes and reopen nominations"
                 >
@@ -432,12 +452,10 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
 
             {data.runoff && (
               <div className="club-runoff-banner">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 5h-2v6l5 3 1-1.7-4-2.3V7z" />
-                </svg>
+                <IconClock size={18} />
                 <span>
-                  <strong>Runoff</strong> — {activeNominations.map((n) => `"${n.title}"`).join(" vs ")}.
-                  Votes were reset; cast yours again to break the tie.
+                  <strong>Runoff</strong> — {activeNominations.map((n) => `"${n.title}"`).join(" vs ")}. Votes were
+                  reset; cast yours again to break the tie.
                 </span>
               </div>
             )}
@@ -468,7 +486,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
             {data.myVote != null && (
               <div className="muted club-myvote-note">
                 You have one vote — tapping another book moves it.{" "}
-                <button className="link" onClick={unvote}>
+                <button type="button" className="link" onClick={unvote}>
                   Remove my vote
                 </button>
               </div>
@@ -483,9 +501,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       </section>
 
       <section className="club-section">
-        <h3 className="section-title">
-          Members ({data.members.filter((m) => m.status === "accepted").length})
-        </h3>
+        <h3 className="section-title">Members ({data.members.filter((m) => m.status === "accepted").length})</h3>
         <MembersPane
           data={data}
           userId={user.id}
@@ -495,11 +511,11 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
           onError={setError}
         />
         <div className="club-footer-actions">
-          <button className="link danger-link" onClick={requestLeave}>
+          <button type="button" className="link danger" onClick={requestLeave}>
             Leave this club
           </button>
           {isOwner && (
-            <button className="link danger-link" onClick={requestDelete}>
+            <button type="button" className="link danger" onClick={requestDelete}>
               Delete this club
             </button>
           )}
@@ -511,22 +527,15 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
           <h3 className="section-title">Past picks</h3>
           <ul className="plain-list">
             {data.pastPicks.map((p) => (
-              <li key={p.id} className="book-row club-pick-row">
-                {p.cover_url ? (
-                  <img className="cover sm" src={p.cover_url} alt="" />
-                ) : (
-                  <span className="cover sm no-cover" />
-                )}
+              <li key={p.id} className="book-row club-book-row">
+                <Cover url={p.cover_url} size="sm" />
                 <div className="info">
                   <div className="title">
-                    <button className="link book-title-link" onClick={() => (window.location.hash = `#/book/${p.book_id}`)}>
+                    <a href={`#/book/${p.book_id}`} className="book-title-link">
                       {p.title}
-                    </button>
+                    </a>
                   </div>
-                  <div className="author">
-                    {p.author || "Unknown author"}
-                    {p.first_publish_year ? ` · ${p.first_publish_year}` : ""}
-                  </div>
+                  <Byline author={p.author} year={p.first_publish_year} />
                 </div>
               </li>
             ))}
@@ -535,231 +544,146 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       )}
 
       {showMemberLeave && (
-        <div className="modal-overlay" onClick={() => setShowMemberLeave(false)}>
-          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Leave this club</h2>
-              <button className="modal-close" onClick={() => setShowMemberLeave(false)}>
-                ×
-              </button>
-            </div>
-            <div className="club-modal-body">
-              <p className="muted">Leave "{data.club.name}"? You'll need a new invite to rejoin.</p>
-              <div className="form-actions">
-                <button className="btn-delete" disabled={leaveBusy} onClick={leave}>
-                  {leaveBusy ? "Leaving…" : "Leave club"}
-                </button>
-                <button className="btn-secondary" onClick={() => setShowMemberLeave(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Leave this club"
+          confirmLabel="Leave club"
+          busyLabel="Leaving…"
+          busy={leaveBusy}
+          danger
+          onConfirm={leave}
+          onCancel={() => setShowMemberLeave(false)}
+        >
+          Leave "{data.club.name}"? You'll need a new invite to rejoin.
+        </ConfirmDialog>
       )}
 
       {showLeave && (
-        <div className="modal-overlay" onClick={() => setShowLeave(false)}>
-          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Leave this club</h2>
-              <button className="modal-close" onClick={() => setShowLeave(false)}>
-                ×
+        <Modal title="Leave this club" onClose={() => setShowLeave(false)}>
+          <div className="modal-body">
+            <p className="muted">
+              You own this club. Transfer ownership to one of its members to leave — or delete the club for everyone.
+            </p>
+            {transferCandidates.length > 0 ? (
+              <>
+                <div className="field">
+                  <span className="field-label">Transfer ownership to</span>
+                  <div className="chip-picker">
+                    {transferCandidates.map((m) => (
+                      <button
+                        type="button"
+                        key={m.user_id}
+                        className={`chip${transferTarget === m.user_id ? " picked" : ""}`}
+                        onClick={() => setTransferTarget(m.user_id)}
+                      >
+                        @{m.username}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="form-actions">
+                  <button type="button" className="btn-secondary" onClick={() => setShowLeave(false)}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={transferTarget == null || transferBusy}
+                    onClick={transferAndLeave}
+                  >
+                    {transferBusy ? "Transferring…" : "Transfer ownership & leave"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="empty">You're the only member. Invite someone first — or delete the club below.</div>
+            )}
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="link danger"
+                onClick={() => {
+                  setShowLeave(false);
+                  requestDelete();
+                }}
+              >
+                Delete this club instead
               </button>
             </div>
-            <div className="club-modal-body">
-              <p className="muted">
-                You own this club. Transfer ownership to one of its members to leave — or delete the club for everyone.
-              </p>
-              {transferCandidates.length > 0 ? (
-                <>
-                  <div className="form-field">
-                    <span className="small-label">Transfer ownership to</span>
-                    <div className="club-friend-picker">
-                      {transferCandidates.map((m) => (
-                        <button
-                          type="button"
-                          key={m.user_id}
-                          className={"club-friend-chip" + (transferTarget === m.user_id ? " picked" : "")}
-                          onClick={() => setTransferTarget(m.user_id)}
-                        >
-                          @{m.username}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="form-actions">
-                    <button
-                      className="btn-primary"
-                      disabled={transferTarget == null || transferBusy}
-                      onClick={transferAndLeave}
-                    >
-                      {transferBusy ? "Transferring…" : "Transfer ownership & leave"}
-                    </button>
-                    <button className="btn-secondary" onClick={() => setShowLeave(false)}>
-                      Cancel
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="empty">
-                  You're the only member. Invite someone first — or delete the club below.
-                </div>
-              )}
-              <div className="club-leave-footer">
-                <button
-                  className="link danger-link"
-                  onClick={() => {
-                    setShowLeave(false);
-                    requestDelete();
-                  }}
-                >
-                  Delete this club instead
-                </button>
-              </div>
-            </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {showRunoff && (
-        <div className="modal-overlay" onClick={() => setShowRunoff(false)}>
-          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>{tiedNominations.length > 1 ? "It's a tie" : "No majority yet"}</h2>
-              <button className="modal-close" onClick={() => setShowRunoff(false)}>
-                ×
-              </button>
-            </div>
-            <div className="club-modal-body">
-              <p className="muted">
-                {tiedNominations.length > 1
-                  ? `${tiedNominations.map((n) => `"${n.title}"`).join(" and ")} are tied at ${topVotes} ${topVotes === 1 ? "vote" : "votes"} each.`
-                  : `"${tiedNominations[0]?.title}" leads with ${topVotes} of ${totalVotes} votes — short of a majority.`}{" "}
-                Start a runoff between {runoffNominations.map((n) => `"${n.title}"`).join(" and ")}? The
-                other nominations are dropped, votes reset, and everyone votes again between just these
-                books.
-              </p>
-              <div className="form-actions">
-                <button className="btn-primary" disabled={runoffBusy} onClick={startRunoff}>
-                  {runoffBusy ? "Starting…" : "Start runoff"}
-                </button>
-                <button className="btn-secondary" onClick={() => setShowRunoff(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title={tiedNominations.length > 1 ? "It's a tie" : "No majority yet"}
+          confirmLabel="Start runoff"
+          busyLabel="Starting…"
+          busy={runoffBusy}
+          onConfirm={startRunoff}
+          onCancel={() => setShowRunoff(false)}
+        >
+          {tiedNominations.length > 1
+            ? `${tiedNominations.map((n) => `"${n.title}"`).join(" and ")} are tied at ${topVotes} ${topVotes === 1 ? "vote" : "votes"} each.`
+            : `"${tiedNominations[0]?.title}" leads with ${topVotes} of ${totalVotes} votes — short of a majority.`}{" "}
+          Start a runoff between {runoffNominations.map((n) => `"${n.title}"`).join(" and ")}? The other nominations are
+          dropped, votes reset, and everyone votes again between just these books.
+        </ConfirmDialog>
       )}
 
       {showResetVote && (
-        <div className="modal-overlay" onClick={() => setShowResetVote(false)}>
-          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Reset voting?</h2>
-              <button className="modal-close" onClick={() => setShowResetVote(false)}>
-                ×
-              </button>
-            </div>
-            <div className="club-modal-body">
-              <p className="muted">
-                All cast votes are cleared{data.runoff ? " and the runoff ends" : ""}, and the club goes
-                back to the nomination stage. Nominations stay so the field can be adjusted before
-                voting again.
-              </p>
-              <div className="form-actions">
-                <button className="btn-primary" onClick={backToNominations}>
-                  Reset voting
-                </button>
-                <button className="btn-secondary" onClick={() => setShowResetVote(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Reset voting?"
+          confirmLabel="Reset voting"
+          onConfirm={backToNominations}
+          onCancel={() => setShowResetVote(false)}
+        >
+          All cast votes are cleared{data.runoff ? " and the runoff ends" : ""}, and the club goes back to the
+          nomination stage. Nominations stay so the field can be adjusted before voting again.
+        </ConfirmDialog>
       )}
 
       {vetoTarget && (
-        <div className="modal-overlay" onClick={() => setVetoTarget(null)}>
-          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Veto this book</h2>
-              <button className="modal-close" onClick={() => setVetoTarget(null)}>
-                ×
-              </button>
-            </div>
-            <div className="club-modal-body">
-              <p className="muted">
-                Veto "{vetoTarget.title}"? It's struck from this vote and any votes for it are released.
-                You only get one veto per vote, and this can't be undone.
-              </p>
-              <div className="form-actions">
-                <button className="btn-delete" disabled={vetoBusy} onClick={veto}>
-                  {vetoBusy ? "Vetoing…" : "Veto book"}
-                </button>
-                <button className="btn-secondary" onClick={() => setVetoTarget(null)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Veto this book"
+          confirmLabel="Veto book"
+          busyLabel="Vetoing…"
+          busy={vetoBusy}
+          danger
+          onConfirm={veto}
+          onCancel={() => setVetoTarget(null)}
+        >
+          Veto "{vetoTarget.title}"? It's struck from this vote and any votes for it are released. You only get one veto
+          per vote, and this can't be undone.
+        </ConfirmDialog>
       )}
 
       {removeTarget && (
-        <div className="modal-overlay" onClick={() => setRemoveTarget(null)}>
-          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Remove this book</h2>
-              <button className="modal-close" onClick={() => setRemoveTarget(null)}>
-                ×
-              </button>
-            </div>
-            <div className="club-modal-body">
-              <p className="muted">
-                Remove "{removeTarget.title}" from the vote? It leaves the list entirely — any votes for it are
-                released, and it can be nominated again like new. For accidents; use your veto to block a book
-                you oppose.
-              </p>
-              <div className="form-actions">
-                <button className="btn-delete" disabled={removeBusy} onClick={removeNomination}>
-                  {removeBusy ? "Removing…" : "Remove book"}
-                </button>
-                <button className="btn-secondary" onClick={() => setRemoveTarget(null)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Remove this book"
+          confirmLabel="Remove book"
+          busyLabel="Removing…"
+          busy={removeBusy}
+          danger
+          onConfirm={removeNomination}
+          onCancel={() => setRemoveTarget(null)}
+        >
+          Remove "{removeTarget.title}" from the vote? It leaves the list entirely — any votes for it are released, and
+          it can be nominated again like new. For accidents; use your veto to block a book you oppose.
+        </ConfirmDialog>
       )}
 
       {showDelete && (
-        <div className="modal-overlay" onClick={() => setShowDelete(false)}>
-          <div className="modal club-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Delete this club</h2>
-              <button className="modal-close" onClick={() => setShowDelete(false)}>
-                ×
-              </button>
-            </div>
-            <div className="club-modal-body">
-              <p className="muted">
-                Delete "{data.club.name}"? Nominations, votes, and picks are removed for every member. This can't be undone.
-              </p>
-              <div className="form-actions">
-                <button className="btn-delete" disabled={deleteBusy} onClick={deleteClub}>
-                  {deleteBusy ? "Deleting…" : "Delete club"}
-                </button>
-                <button className="btn-secondary" onClick={() => setShowDelete(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Delete this club"
+          confirmLabel="Delete club"
+          busyLabel="Deleting…"
+          busy={deleteBusy}
+          danger
+          onConfirm={deleteClub}
+          onCancel={() => setShowDelete(false)}
+        >
+          Delete "{data.club.name}"? Nominations, votes, and picks are removed for every member. This can't be undone.
+        </ConfirmDialog>
       )}
     </div>
   );
@@ -781,10 +705,10 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
       setSearching(true);
       setError("");
       try {
-        const d = await api<{ results: SearchHit[] }>("/api/books/search?mine=1&q=" + encodeURIComponent(q.trim()));
+        const d = await api<{ results: SearchHit[] }>(`/api/books/search?mine=1&q=${encodeURIComponent(q.trim())}`);
         setHits(d.results);
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e) {
+        setError(errorMessage(e));
       } finally {
         setSearching(false);
       }
@@ -798,17 +722,15 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
     try {
       await api(`/api/clubs/${clubId}/nominate`, {
         method: "POST",
-        body: JSON.stringify(
-          hit.bookId != null ? { book_id: hit.bookId } : { ol_key: hit.key, year: hit.year }
-        ),
+        body: JSON.stringify(hit.bookId != null ? { book_id: hit.bookId } : { ol_key: hit.key, year: hit.year }),
       });
       setStatus((s) => ({ ...s, [hit.key]: "Nominated" }));
       setQ("");
       setHits([]);
       onNominated();
-    } catch (e: any) {
+    } catch (e) {
       setStatus((s) => ({ ...s, [hit.key]: "" }));
-      setError(e.message);
+      setError(errorMessage(e));
     }
   }
 
@@ -825,11 +747,7 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
             const st = status[h.key];
             return (
               <li key={h.key} className="book-row">
-                {h.coverUrl ? (
-                  <img className="cover" src={h.coverUrl} alt="" />
-                ) : (
-                  <span className="cover no-cover" />
-                )}
+                <Cover url={h.coverUrl} />
                 <div className="info">
                   <div className="title">
                     {h.title}
@@ -839,16 +757,14 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
                       </span>
                     )}
                   </div>
-                  <div className="author">
-                    {h.author || "Unknown author"}
-                    {h.year ? ` · ${h.year}` : ""}
-                  </div>
+                  <Byline author={h.author} year={h.year} />
                 </div>
                 <div className="actions">
                   {st === "Nominated" ? (
-                    <span className="added">Nominated</span>
+                    <span className="success-text">Nominated</span>
                   ) : (
                     <button
+                      type="button"
                       onClick={() => nominate(h)}
                       disabled={st === "Nominating…" || st === "Nominated"}
                     >
@@ -891,42 +807,29 @@ function NominationRow({
     <motion.li
       layout
       transition={{ type: "spring", stiffness: 500, damping: 40 }}
-      className={"book-row club-nomination-row" + (myVote ? " my-vote" : "") + (vetoed ? " vetoed" : "")}
+      className={`book-row club-book-row${myVote ? " my-vote" : ""}${vetoed ? " vetoed" : ""}`}
     >
-      {n.cover_url ? (
-        <img className="cover" src={n.cover_url} alt="" />
-      ) : (
-        <span className="cover no-cover" />
-      )}
+      <Cover url={n.cover_url} />
       <div className="info">
         <div className="title">
           {n.title}
-          {myVote && <span className="badge vote-badge">Your vote</span>}
-          {vetoed && <span className="badge veto-badge">Vetoed by @{n.vetoedBy ?? "a member"}</span>}
+          {myVote && <span className="badge accent">Your vote</span>}
+          {vetoed && <span className="badge danger">Vetoed by @{n.vetoedBy ?? "a member"}</span>}
         </div>
-        <div className="author">
-          {n.author || "Unknown author"}
-          {n.first_publish_year ? ` · ${n.first_publish_year}` : ""}
-          {` · nominated by @${n.nominatedBy}`}
-        </div>
+        <Byline author={n.author} year={n.first_publish_year} extra={`nominated by @${n.nominatedBy}`} />
       </div>
       <div className="actions">
         {!vetoed && voting && (
           <>
             <span className="club-vote-count" title={`${n.votes} vote${n.votes === 1 ? "" : "s"}`}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M2 21h4V9H2v12zM22 10c0-1.1-.9-2-2-2h-6.3l1-4.6v-.3c0-.4-.2-.8-.4-1.1L13 1 7.6 6.4C7.2 6.8 7 7.3 7 7.8V19c0 1.1.9 2 2 2h8.4c.8 0 1.6-.5 1.9-1.3l2.6-6.1c.1-.2.1-.4.1-.6V10z" />
-              </svg>
+              <IconThumbsUp />
               {n.votes}
             </span>
-            <button
-              className={myVote ? "secondary" : ""}
-              onClick={myVote ? onUnvote : onVote}
-            >
+            <button type="button" onClick={myVote ? onUnvote : onVote}>
               {myVote ? "Unvote" : "Vote"}
             </button>
             {canVeto && (
-              <button className="secondary club-veto-btn" onClick={onVeto} title="Strike this book (one veto per vote)">
+              <button type="button" className="danger" onClick={onVeto} title="Strike this book (one veto per vote)">
                 Veto
               </button>
             )}
@@ -934,13 +837,13 @@ function NominationRow({
         )}
         {isOwner && (
           <button
-            className="club-nomination-remove"
+            type="button"
+            className="icon-btn remove"
             onClick={onRemove}
             title={vetoed ? "Remove this entry entirely" : "Remove from vote (accidental nomination)"}
+            aria-label="Remove nomination"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
+            <IconX size={14} />
           </button>
         )}
       </div>
@@ -948,7 +851,7 @@ function NominationRow({
   );
 }
 
-function CurrentPick({ pick }: { pick: ClubDetailData["currentPick"] }) {
+function CurrentPick({ pick }: { pick: NonNullable<ClubDetailData["currentPick"]> }) {
   const [started, setStarted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -959,40 +862,33 @@ function CurrentPick({ pick }: { pick: ClubDetailData["currentPick"] }) {
     try {
       await api("/api/me/reading", {
         method: "POST",
-        body: JSON.stringify({ book_id: pick!.book_id }),
+        body: JSON.stringify({ book_id: pick.book_id }),
       });
       setStarted(true);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section className="club-section club-current">
+    <section className="card">
       <h3 className="section-title">Current read</h3>
       <div className="book-row">
-        {pick!.cover_url ? (
-          <img className="cover" src={pick!.cover_url} alt="" />
-        ) : (
-          <span className="cover no-cover" />
-        )}
+        <Cover url={pick.cover_url} />
         <div className="info">
           <div className="title">
-            <button className="link book-title-link" onClick={() => (window.location.hash = `#/book/${pick!.book_id}`)}>
-              {pick!.title}
-            </button>
+            <a href={`#/book/${pick.book_id}`} className="book-title-link">
+              {pick.title}
+            </a>
           </div>
-          <div className="author">
-            {pick!.author || "Unknown author"}
-            {pick!.first_publish_year ? ` · ${pick!.first_publish_year}` : ""}
-          </div>
+          <Byline author={pick.author} year={pick.first_publish_year} />
           <div className="actions">
             {started ? (
-              <span className="added">On your reading list</span>
+              <span className="success-text">On your reading list</span>
             ) : (
-              <button onClick={startReading} disabled={busy}>
+              <button type="button" onClick={startReading} disabled={busy}>
                 {busy ? "Adding…" : "Start reading"}
               </button>
             )}
@@ -1021,11 +917,16 @@ function MembersPane({
 }) {
   const [friends, setFriends] = useState<{ user_id: number; username: string }[]>([]);
   const [inviteQ, setInviteQ] = useState("");
+  const [addQ, setAddQ] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+  const [note, setNote] = useState("");
+
+  function loadFriends() {
+    fetchFriends().then(setFriends);
+  }
 
   useEffect(() => {
-    api<{ friends: { user_id: number; username: string }[] }>("/api/friends")
-      .then((d) => setFriends(d.friends))
-      .catch(() => setFriends([]));
+    fetchFriends().then(setFriends);
   }, []);
 
   const memberIds = new Set(data.members.map((m) => m.user_id));
@@ -1033,8 +934,7 @@ function MembersPane({
   const pending = data.members.filter((m) => m.status === "pending");
   const inviteCandidates = friends.filter(
     (f) =>
-      !memberIds.has(f.user_id) &&
-      (!inviteQ.trim() || f.username.toLowerCase().includes(inviteQ.trim().toLowerCase()))
+      !memberIds.has(f.user_id) && (!inviteQ.trim() || f.username.toLowerCase().includes(inviteQ.trim().toLowerCase())),
   );
 
   async function invite(username: string) {
@@ -1046,17 +946,57 @@ function MembersPane({
       });
       setInviteQ("");
       onInvited();
-    } catch (e: any) {
-      onError(e.message);
+    } catch (e) {
+      onError(errorMessage(e));
+    }
+  }
+
+  // Add someone who isn't a friend yet: send a friend request (a mutual
+  // request auto-accepts, and we invite them right away). Existing friends
+  // are invited directly.
+  async function addByUsername(e: React.FormEvent) {
+    e.preventDefault();
+    const q = addQ.trim();
+    if (!q || addBusy) return;
+    setAddBusy(true);
+    setNote("");
+    onError("");
+    try {
+      const existing = friends.find((f) => f.username.toLowerCase() === q.toLowerCase());
+      if (existing) {
+        await invite(existing.username);
+        setAddQ("");
+        return;
+      }
+      const r = await api<{ username?: string; autoAccepted?: boolean }>("/api/friends/requests", {
+        method: "POST",
+        body: JSON.stringify({ usernameOrEmail: q }),
+      });
+      setAddQ("");
+      if (r.autoAccepted && r.username) {
+        await api(`/api/clubs/${data.club.id}/invite`, {
+          method: "POST",
+          body: JSON.stringify({ username: r.username }),
+        });
+        setNote(`You're now friends with @${r.username} — invite sent.`);
+        loadFriends();
+        onInvited();
+      } else {
+        setNote(`Friend request sent to @${r.username ?? q} — you can invite them once they accept.`);
+      }
+    } catch (e) {
+      onError(errorMessage(e));
+    } finally {
+      setAddBusy(false);
     }
   }
 
   function memberRow(m: ClubMember) {
     return (
       <li key={m.user_id} className="club-member">
-        <button className="link club-member-name" onClick={() => (window.location.hash = `#/u/${encodeURIComponent(m.username)}`)}>
+        <a href={`#/u/${encodeURIComponent(m.username)}`} className="club-member-name">
           @{m.username}
-        </button>
+        </a>
         <span className="muted club-member-tags">
           {m.role === "owner" ? "owner" : "member"}
           {m.status === "pending" && " · invited"}
@@ -1064,13 +1004,13 @@ function MembersPane({
         </span>
         {isOwner && m.role !== "owner" && (
           <button
-            className="club-member-remove"
+            type="button"
+            className="icon-btn remove"
             title={m.status === "pending" ? "Cancel invite" : "Remove from club"}
+            aria-label={m.status === "pending" ? "Cancel invite" : "Remove from club"}
             onClick={() => onRemove(m.user_id)}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
+            <IconX size={14} />
           </button>
         )}
       </li>
@@ -1082,27 +1022,38 @@ function MembersPane({
       <ul className="club-member-list">{accepted.map(memberRow)}</ul>
       {pending.length > 0 && (
         <>
-          <div className="small-label club-invited-label">Invited ({pending.length})</div>
+          <div className="field-label club-invited-label">Invited ({pending.length})</div>
           <ul className="club-member-list">{pending.map(memberRow)}</ul>
         </>
       )}
-      {inviteCandidates.length > 0 && (
-        <div className="club-invite-box">
-          <span className="small-label">Invite a friend</span>
-          <input
-            value={inviteQ}
-            onChange={(e) => setInviteQ(e.target.value)}
-            placeholder="Filter your friends…"
-          />
-          <div className="club-friend-picker">
-            {inviteCandidates.map((f) => (
-              <button key={f.user_id} type="button" className="club-friend-chip" onClick={() => invite(f.username)}>
-                @{f.username}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      <div className="club-invite-box">
+        <span className="field-label">Invite a friend</span>
+        {inviteCandidates.length > 0 && (
+          <>
+            <input value={inviteQ} onChange={(e) => setInviteQ(e.target.value)} placeholder="Filter your friends…" />
+            <div className="chip-picker">
+              {inviteCandidates.map((f) => (
+                <button key={f.user_id} type="button" className="chip" onClick={() => invite(f.username)}>
+                  @{f.username}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        <form className="search-bar" onSubmit={addByUsername}>
+          <input value={addQ} onChange={(e) => setAddQ(e.target.value)} placeholder="Add by username or email…" />
+          <button type="submit" className="btn-secondary" disabled={addBusy}>
+            {addBusy ? "…" : "Add"}
+          </button>
+        </form>
+        {note && <div className="muted">{note}</div>}
+      </div>
     </div>
   );
+}
+
+function fetchFriends() {
+  return api<{ friends: { user_id: number; username: string }[] }>("/api/friends")
+    .then((d) => d.friends)
+    .catch(() => []);
 }

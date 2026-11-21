@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { api, ReadingItem } from "../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, errorMessage, type ReadingItem } from "../api";
+import { Cover } from "./ui/Book";
 
 interface Friend {
   user_id: number;
@@ -33,7 +34,7 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
   const [info, setInfo] = useState("");
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const [f, r] = await Promise.all([
         api<{ friends: Friend[] }>("/api/friends"),
@@ -42,14 +43,15 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
       setFriends(f.friends);
       setIncoming(r.incoming);
       setOutgoing(r.outgoing);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
     }
-  }
+  }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a refetch trigger
   useEffect(() => {
     load();
-  }, [refreshKey]);
+  }, [load, refreshKey]);
 
   useEffect(() => {
     const q = addInput.trim();
@@ -85,8 +87,8 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
       setAddInput("");
       await load();
       onFriendRequestsChanged();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(errorMessage(err));
     }
   }
 
@@ -101,8 +103,8 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
       setInfo(r.autoAccepted ? `You are now friends with ${r.username}!` : `Request sent to ${r.username}.`);
       await load();
       onFriendRequestsChanged();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(errorMessage(err));
     }
   }
 
@@ -111,8 +113,8 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
       await api(`/api/friends/requests/${id}/${action}`, { method: "POST" });
       await load();
       onFriendRequestsChanged();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
     }
   }
 
@@ -120,8 +122,8 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
     try {
       await api(`/api/friends/${id}`, { method: "DELETE" });
       await load();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errorMessage(e));
     }
   }
 
@@ -135,7 +137,7 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
       </div>
 
       {error && <div className="error">{error}</div>}
-      {info && <div className="info">{info}</div>}
+      {info && <div className="success">{info}</div>}
 
       <section>
         <p className="muted">Search by name, email, or username to find people and add them as friends.</p>
@@ -147,28 +149,30 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
             placeholder="Search by name, email, or username…"
             autoFocus
           />
-          <button type="submit">Add friend</button>
+          <button type="submit" className="btn-primary">
+            Add friend
+          </button>
         </form>
 
-        {searching && <div className="muted" style={{ marginTop: "0.5rem" }}>Searching…</div>}
+        {searching && <div className="muted">Searching…</div>}
 
         {searchResults.length > 0 && (
-          <ul className="plain-list" style={{ marginTop: "0.5rem" }}>
+          <ul className="plain-list">
             {searchResults.map((u) => {
               const isFriend = friendIds.has(u.id);
               const isPending = outgoingIds.has(u.id);
               return (
                 <li key={u.id} className="row">
-                  <button className="friend-link" onClick={() => onOpenProfile(u.username)}>
+                  <a className="user-link" href={`#/u/${encodeURIComponent(u.username)}`}>
                     @{u.username}
-                  </button>
+                  </a>
                   <div className="actions">
                     {isFriend ? (
                       <span className="muted">Already friends</span>
                     ) : isPending ? (
                       <span className="muted">Request sent</span>
                     ) : (
-                      <button onClick={() => addFriendByUsername(u.username)}>
+                      <button type="button" onClick={() => addFriendByUsername(u.username)}>
                         Add friend
                       </button>
                     )}
@@ -179,23 +183,21 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
           </ul>
         )}
 
-        {addInput.trim() && !searching && searchResults.length === 0 && (
-          <div className="empty muted" style={{ padding: "0.5rem 0" }}>
-            No users found.
-          </div>
-        )}
+        {addInput.trim() && !searching && searchResults.length === 0 && <p className="muted">No users found.</p>}
 
         {incoming.length > 0 && (
           <section>
-            <h4>Requests to you</h4>
+            <h3 className="section-title">Requests to you</h3>
             <ul className="plain-list">
               {incoming.map((r) => (
                 <li key={r.id} className="row">
                   <span className="username">@{r.username}</span>
                   <div className="actions">
-                    <button onClick={() => respond(r.id, "accept")}>Accept</button>
-                    <button className="danger" onClick={() => respond(r.id, "decline")}>
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => respond(r.id, "decline")}>
                       Decline
+                    </button>
+                    <button type="button" className="btn-primary btn-sm" onClick={() => respond(r.id, "accept")}>
+                      Accept
                     </button>
                   </div>
                 </li>
@@ -206,7 +208,7 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
 
         {outgoing.length > 0 && (
           <section>
-            <h4>Sent (pending)</h4>
+            <h3 className="section-title">Sent (pending)</h3>
             <ul className="plain-list">
               {outgoing.map((r) => (
                 <li key={r.id} className="row">
@@ -219,7 +221,7 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
         )}
 
         <section>
-          <h4>Your friends</h4>
+          <h3 className="section-title">Your friends</h3>
           {friends.length === 0 ? (
             <div className="empty">
               <p className="muted">No friends yet — add someone above.</p>
@@ -229,12 +231,14 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
               {friends.map((f) => (
                 <li key={f.user_id} className="row friend-row">
                   <div className="friend-row-head">
-                    <button className="friend-link" onClick={() => onOpenProfile(f.username)}>
+                    <a className="user-link" href={`#/u/${encodeURIComponent(f.username)}`}>
                       @{f.username}
-                    </button>
+                    </a>
                     <div className="actions">
-                      <button onClick={() => onOpenProfile(f.username)}>View profile</button>
-                      <button className="danger" onClick={() => unfriend(f.user_id)}>
+                      <button type="button" onClick={() => onOpenProfile(f.username)}>
+                        View profile
+                      </button>
+                      <button type="button" className="danger" onClick={() => unfriend(f.user_id)}>
                         Remove
                       </button>
                     </div>
@@ -249,15 +253,7 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
                           href={`#/book/${b.book_id}`}
                           title={b.author ? `${b.title} — ${b.author}` : b.title}
                         >
-                          {b.cover_url ? (
-                            <img className="cover sm" src={b.cover_url} alt="" />
-                          ) : (
-                            <span className="cover sm no-cover">
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                <path d="M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 2v16h12V4H6zm2 3h8v2H8V7zm0 4h8v2H8v-2z" />
-                              </svg>
-                            </span>
-                          )}
+                          <Cover url={b.cover_url} size="sm" />
                           <span className="friend-reading-title">{b.title}</span>
                         </a>
                       ))}

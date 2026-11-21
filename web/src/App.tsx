@@ -1,17 +1,17 @@
-import { useEffect, useState } from "react";
-import { api, User } from "./api";
-import Auth from "./components/Auth";
-import MyBooks from "./components/MyBooks";
-import AddBook from "./components/AddBook";
-import Friends from "./components/Friends";
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { api, type User } from "./api";
 import Account from "./components/Account";
-import Profile from "./components/Profile";
+import AddBook from "./components/AddBook";
+import Auth from "./components/Auth";
 import BookDetail from "./components/BookDetail";
-import Settings from "./components/Settings";
-import Notifications from "./components/Notifications";
-import Clubs from "./components/Clubs";
 import ClubDetail from "./components/ClubDetail";
+import Clubs from "./components/Clubs";
+import Friends from "./components/Friends";
+import Notifications from "./components/Notifications";
+import Profile from "./components/Profile";
+import Settings from "./components/Settings";
 import UserMenu from "./components/UserMenu";
+import { IconBell } from "./components/ui/icons";
 
 type Route =
   | { name: "books" }
@@ -27,11 +27,11 @@ function parseRoute(): Route {
   const h = window.location.hash;
   if (h.startsWith("#/book/")) {
     const bookId = parseInt(h.slice(7), 10);
-    if (!isNaN(bookId)) return { name: "book", bookId };
+    if (!Number.isNaN(bookId)) return { name: "book", bookId };
   }
   if (h.startsWith("#/club/")) {
     const clubId = parseInt(h.slice(7), 10);
-    if (!isNaN(clubId)) return { name: "club", clubId };
+    if (!Number.isNaN(clubId)) return { name: "club", clubId };
   }
   if (h.startsWith("#/u/")) return { name: "profile", username: decodeURIComponent(h.slice(4)) };
   if (h === "#/add") return { name: "add" };
@@ -72,6 +72,26 @@ export default function App() {
   );
 }
 
+// Stacks the header (tabs on their own row) only when the one-row layout
+// actually wraps, so adding tabs or long usernames can never leave a half-wrapped header.
+function useStackWhenWrapped(ref: RefObject<HTMLElement | null>) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => {
+      // Measure the one-row layout; class changes and reads happen before paint, so no flicker.
+      el.classList.remove("stacked");
+      const rects = [...el.children].map((c) => c.getBoundingClientRect());
+      const wrapped = Math.max(...rects.map((r) => r.top)) >= Math.min(...rects.map((r) => r.bottom));
+      el.classList.toggle("stacked", wrapped);
+    };
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+}
+
 type TabName = "books" | "add" | "friends" | "clubs";
 
 function Main({
@@ -89,6 +109,8 @@ function Main({
     route.name === "books" || route.name === "add" || route.name === "friends" || route.name === "clubs"
       ? route.name
       : null;
+  const headerRef = useRef<HTMLElement>(null);
+  useStackWhenWrapped(headerRef);
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -98,13 +120,14 @@ function Main({
   const bumpFriendRequests = () => setFriendRequestsVersion((v) => v + 1);
 
   // Fetch unread notification count (also refetches when friend requests change)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: friendRequestsVersion is a refetch trigger
   useEffect(() => {
     const fetchCount = () => {
       api<{ unreadCount: number }>("/api/notifications")
         .then((d) => setUnreadCount(d.unreadCount))
         .catch(() => {});
     };
-    
+
     fetchCount();
     const interval = setInterval(fetchCount, 30000); // Poll every 30 seconds
     return () => clearInterval(interval);
@@ -115,54 +138,42 @@ function Main({
   }
 
   function openProfile(username: string) {
-    window.location.hash = "#/u/" + encodeURIComponent(username);
+    window.location.hash = `#/u/${encodeURIComponent(username)}`;
   }
 
   return (
     <div className="app">
-      <header className="topbar">
+      <header className="topbar" ref={headerRef}>
         <h1>BookRecs</h1>
         <nav>
-          <button className={active === "books" ? "active" : ""} onClick={() => onNavigate("books")}>
+          <button type="button" className={active === "books" ? "active" : ""} onClick={() => onNavigate("books")}>
             My Books
           </button>
-          <button className={active === "add" ? "active" : ""} onClick={() => onNavigate("add")}>
+          <button type="button" className={active === "add" ? "active" : ""} onClick={() => onNavigate("add")}>
             Add Book
           </button>
-          <button className={active === "friends" ? "active" : ""} onClick={() => onNavigate("friends")}>
+          <button type="button" className={active === "friends" ? "active" : ""} onClick={() => onNavigate("friends")}>
             Friends
           </button>
-          <button className={active === "clubs" ? "active" : ""} onClick={() => onNavigate("clubs")}>
+          <button type="button" className={active === "clubs" ? "active" : ""} onClick={() => onNavigate("clubs")}>
             Clubs
           </button>
         </nav>
         <div className="userbox">
           <button
-            className="link notification-bell"
+            type="button"
+            className="icon-btn notification-bell"
             onClick={() => setShowNotifications(true)}
             title="Notifications"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C10.343 2 9 3.343 9 5V5.29C6.716 6.144 5 8.381 5 11V16L3 18V19H21V18L19 16V11C19 8.381 17.284 6.144 15 5.29V5C15 3.343 13.657 2 12 2ZM12 4C12.552 4 13 4.448 13 5V5.065C12.672 5.021 12.34 5 12 5C11.66 5 11.328 5.021 11 5.065V5C11 4.448 11.448 4 12 4ZM10 20C10 21.105 10.895 22 12 22C13.105 22 14 21.105 14 20H10Z"/>
-            </svg>
+            <IconBell size={20} />
             {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
           </button>
-          <UserMenu
-            username={user.username}
-            onAccount={() => (window.location.hash = "#/account")}
-            onLogout={logout}
-          />
+          <UserMenu username={user.username} onAccount={() => (window.location.hash = "#/account")} onLogout={logout} />
         </div>
       </header>
       <main>
-        {active === "books" && (
-          <Profile
-            key={user.username}
-            username={user.username}
-            me={user}
-            onBack={() => {}}
-          />
-        )}
+        {active === "books" && <Profile key={user.username} username={user.username} me={user} />}
         {active === "add" && <AddBook />}
         {active === "friends" && (
           <Friends
@@ -171,47 +182,15 @@ function Main({
             onOpenProfile={openProfile}
           />
         )}
-        {route.name === "account" && (
-          <Account user={user} onChangePassword={() => setShowSettings(true)} />
-        )}
+        {route.name === "account" && <Account user={user} onChangePassword={() => setShowSettings(true)} />}
         {active === "clubs" && (
-          <Clubs
-            key={user.username}
-            user={user}
-            refreshKey={friendRequestsVersion}
-            onClubsChanged={bumpFriendRequests}
-          />
+          <Clubs key={user.username} refreshKey={friendRequestsVersion} onClubsChanged={bumpFriendRequests} />
         )}
-        {route.name === "club" && (
-          <ClubDetail
-            key={route.clubId}
-            user={user}
-            clubId={route.clubId}
-          />
-        )}
-        {route.name === "profile" && (
-          <Profile
-            key={route.username}
-            username={route.username}
-            me={user}
-            onBack={() => {
-              window.location.hash = "#/books";
-            }}
-          />
-        )}
-        {route.name === "book" && (
-          <BookDetail
-            key={route.bookId}
-            bookId={route.bookId}
-            onBack={() => {
-              window.history.back();
-            }}
-          />
-        )}
+        {route.name === "club" && <ClubDetail key={route.clubId} user={user} clubId={route.clubId} />}
+        {route.name === "profile" && <Profile key={route.username} username={route.username} me={user} />}
+        {route.name === "book" && <BookDetail key={route.bookId} bookId={route.bookId} />}
       </main>
-      {showSettings && (
-        <Settings onClose={() => setShowSettings(false)} />
-      )}
+      {showSettings && <Settings onClose={() => setShowSettings(false)} />}
       {showNotifications && (
         <Notifications
           refreshKey={friendRequestsVersion}

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { IconChevronDown, IconLogOut, IconUser } from "./ui/icons";
 
 interface UserMenuProps {
   username: string;
@@ -30,23 +31,15 @@ export default function UserMenu({ username, onAccount, onLogout }: UserMenuProp
   return (
     <div className="user-menu" ref={ref}>
       <button
+        type="button"
         className="link user-menu-trigger"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
         title="Account menu"
       >
-        @{username}
-        <svg
-          className={"user-menu-chevron" + (open ? " open" : "")}
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <path d="M7 10l5 5 5-5z" />
-        </svg>
+        <span className="user-menu-name">@{username}</span>
+        <IconChevronDown size={14} className={`user-menu-chevron${open ? " open" : ""}`} />
       </button>
       <AnimatePresence>
         {open && (
@@ -59,18 +52,18 @@ export default function UserMenu({ username, onAccount, onLogout }: UserMenuProp
             transition={{ duration: 0.14, ease: "easeOut" }}
           >
             <button
+              type="button"
               role="menuitem"
               onClick={() => {
                 setOpen(false);
                 onAccount();
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.34 0-10 1.67-10 5v2h20v-2c0-3.33-6.66-5-10-5z" />
-              </svg>
+              <IconUser />
               My Account
             </button>
             <button
+              type="button"
               role="menuitem"
               className="danger"
               onClick={() => {
@@ -78,9 +71,7 @@ export default function UserMenu({ username, onAccount, onLogout }: UserMenuProp
                 onLogout();
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" />
-              </svg>
+              <IconLogOut />
               Log out
             </button>
           </motion.div>

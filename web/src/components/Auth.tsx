@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, User } from "../api";
+import { api, errorMessage, type User } from "../api";
 
 export default function Auth({ onAuthed }: { onAuthed: (u: User) => void }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -28,8 +28,8 @@ export default function Auth({ onAuthed }: { onAuthed: (u: User) => void }) {
         });
         onAuthed(d.user);
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -41,7 +41,7 @@ export default function Auth({ onAuthed }: { onAuthed: (u: User) => void }) {
         <h1>BookRecs</h1>
         <p className="tagline">Share what you read, ranked — not rated.</p>
 
-        <div className="tabs">
+        <div className="segmented full">
           <button
             type="button"
             className={mode === "login" ? "active" : ""}
@@ -81,13 +81,7 @@ export default function Auth({ onAuthed }: { onAuthed: (u: User) => void }) {
               autoFocus
               required
             />
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email"
-              required
-            />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" required />
           </>
         )}
         <input
@@ -100,7 +94,7 @@ export default function Auth({ onAuthed }: { onAuthed: (u: User) => void }) {
 
         {error && <div className="error">{error}</div>}
 
-        <button type="submit" disabled={busy}>
+        <button type="submit" className="btn-primary" disabled={busy}>
           {busy ? "Please wait…" : mode === "login" ? "Log in" : "Create account"}
         </button>
       </form>

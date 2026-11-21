@@ -1,16 +1,18 @@
-import { useEffect, useState } from "react";
 import { Reorder, useDragControls } from "framer-motion";
-import { api, Book, User, WishlistItem, ReadingItem, NextUpItem } from "../api";
+import { useEffect, useState } from "react";
+import { api, type Book, errorMessage, type NextUpItem, type ReadingItem, type User, type WishlistItem } from "../api";
+import { Byline, Cover } from "./ui/Book";
+import { IconBook, IconCheck, IconChevronDown, IconGrip, IconHeart, IconUndo, IconX } from "./ui/icons";
+import { Switch } from "./ui/Switch";
 
 interface Props {
   username: string;
   me: User;
-  onBack: () => void;
 }
 
 type Mine = "read" | "wish" | "reading" | null;
 
-export default function Profile({ username, me, onBack }: Props) {
+export default function Profile({ username, me }: Props) {
   const isSelf = username.toLowerCase() === me.username.toLowerCase();
 
   const [books, setBooks] = useState<Book[] | null>(null);
@@ -20,7 +22,7 @@ export default function Profile({ username, me, onBack }: Props) {
   const [readError, setReadError] = useState("");
   const [wishStatus, setWishStatus] = useState<Record<number, string>>({});
   const [readingStatus, setReadingStatus] = useState<Record<number, string>>({});
-  
+
   // Edit state for self
   const [reviews, setReviews] = useState<Record<number, string>>({});
   const [dirty, setDirty] = useState<Record<number, boolean>>({});
@@ -48,11 +50,9 @@ export default function Profile({ username, me, onBack }: Props) {
           }
         }
       })
-      .catch((e) => !cancelled && setReadError(e.message));
+      .catch((e) => !cancelled && setReadError(errorMessage(e)));
 
-    const wishPath = isSelf
-      ? "/api/me/wishlist"
-      : `/api/friends/${encodeURIComponent(username)}/wishlist`;
+    const wishPath = isSelf ? "/api/me/wishlist" : `/api/friends/${encodeURIComponent(username)}/wishlist`;
     api<{ books: WishlistItem[] }>(wishPath)
       .then((d) => !cancelled && setWish(d.books))
       .catch(() => {});
@@ -73,6 +73,20 @@ export default function Profile({ username, me, onBack }: Props) {
     };
   }, [username, isSelf]);
 
+  // Refetches every list after a move between them; next-up depends on all three.
+  async function reloadMine() {
+    const [r, w, g, next] = await Promise.all([
+      api<{ books: Book[] }>("/api/me/books"),
+      api<{ books: WishlistItem[] }>("/api/me/wishlist"),
+      api<{ books: ReadingItem[] }>("/api/me/reading"),
+      api<{ books: NextUpItem[] }>("/api/me/next-up"),
+    ]);
+    setBooks(r.books);
+    setWish(w.books);
+    setReading(g.books);
+    setNextUp(next.books[0] || null);
+  }
+
   // Edit handlers for self
   async function saveReview(bookId: number) {
     setSaving((s) => ({ ...s, [bookId]: true }));
@@ -82,173 +96,120 @@ export default function Profile({ username, me, onBack }: Props) {
         body: JSON.stringify({ review: reviews[bookId] ?? "" }),
       });
       setDirty((d) => ({ ...d, [bookId]: false }));
-    } catch (e: any) {
-      setReadError(e.message);
+    } catch (e) {
+      setReadError(errorMessage(e));
     } finally {
       setSaving((s) => ({ ...s, [bookId]: false }));
     }
   }
 
   async function toggleReadPublic(bookId: number, next: boolean) {
-    setBooks((b) => b ? b.map((x) => (x.book_id === bookId ? { ...x, public: next ? 1 : 0 } : x)) : b);
+    setBooks((b) => (b ? b.map((x) => (x.book_id === bookId ? { ...x, public: next ? 1 : 0 } : x)) : b));
     try {
       await api(`/api/me/books/${bookId}/public`, {
         method: "POST",
         body: JSON.stringify({ public: next }),
       });
-    } catch (e: any) {
-      setReadError(e.message);
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
   async function toggleOwned(item: WishlistItem) {
     const next = !item.owned;
-    setWish((w) => w ? w.map((x) => (x.book_id === item.book_id ? { ...x, owned: next ? 1 : 0 } : x)) : w);
+    setWish((w) => (w ? w.map((x) => (x.book_id === item.book_id ? { ...x, owned: next ? 1 : 0 } : x)) : w));
     try {
       await api(`/api/me/wishlist/${item.book_id}/owned`, {
         method: "POST",
         body: JSON.stringify({ owned: next }),
       });
-    } catch (e: any) {
-      setReadError(e.message);
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
   async function toggleWishPublic(item: WishlistItem) {
     const next = !item.public;
-    setWish((w) => w ? w.map((x) => (x.book_id === item.book_id ? { ...x, public: next ? 1 : 0 } : x)) : w);
+    setWish((w) => (w ? w.map((x) => (x.book_id === item.book_id ? { ...x, public: next ? 1 : 0 } : x)) : w));
     try {
       await api(`/api/me/wishlist/${item.book_id}/public`, {
         method: "POST",
         body: JSON.stringify({ public: next }),
       });
-    } catch (e: any) {
-      setReadError(e.message);
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
   async function startReading(bookId: number) {
     try {
       await api("/api/me/reading", { method: "POST", body: JSON.stringify({ book_id: bookId }) });
-      // Reload data
-      const [r, w, g] = await Promise.all([
-        api<{ books: Book[] }>("/api/me/books"),
-        api<{ books: WishlistItem[] }>("/api/me/wishlist"),
-        api<{ books: ReadingItem[] }>("/api/me/reading"),
-      ]);
-      setBooks(r.books);
-      setWish(w.books);
-      setReading(g.books);
-    } catch (e: any) {
-      setReadError(e.message);
+      await reloadMine();
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
   async function removeRead(bookId: number) {
     try {
       await api(`/api/me/books/${bookId}`, { method: "DELETE" });
-      setBooks((b) => b ? b.filter((x) => x.book_id !== bookId) : b);
-    } catch (e: any) {
-      setReadError(e.message);
+      setBooks((b) => (b ? b.filter((x) => x.book_id !== bookId) : b));
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
   async function removeWish(bookId: number) {
     try {
       await api(`/api/me/wishlist/${bookId}`, { method: "DELETE" });
-      setWish((w) => w ? w.filter((x) => x.book_id !== bookId) : w);
-    } catch (e: any) {
-      setReadError(e.message);
+      setWish((w) => (w ? w.filter((x) => x.book_id !== bookId) : w));
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
   async function startReadingFromNextUp(bookId: number) {
     try {
       await api("/api/me/reading/from-wishlist", { method: "POST", body: JSON.stringify({ book_id: bookId }) });
-      // Reload all data
-      const [r, w, g, next] = await Promise.all([
-        api<{ books: Book[] }>("/api/me/books"),
-        api<{ books: WishlistItem[] }>("/api/me/wishlist"),
-        api<{ books: ReadingItem[] }>("/api/me/reading"),
-        api<{ books: NextUpItem[] }>("/api/me/next-up"),
-      ]);
-      setBooks(r.books);
-      setWish(w.books);
-      setReading(g.books);
-      setNextUp(next.books[0] || null);
-    } catch (e: any) {
-      setReadError(e.message);
+      await reloadMine();
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
   async function removeReading(bookId: number) {
     try {
       await api(`/api/me/reading/${bookId}`, { method: "DELETE" });
-      // Reload all data to reflect any restored wishlist items
-      const [r, w, g, next] = await Promise.all([
-        api<{ books: Book[] }>("/api/me/books"),
-        api<{ books: WishlistItem[] }>("/api/me/wishlist"),
-        api<{ books: ReadingItem[] }>("/api/me/reading"),
-        api<{ books: NextUpItem[] }>("/api/me/next-up"),
-      ]);
-      setBooks(r.books);
-      setWish(w.books);
-      setReading(g.books);
-      setNextUp(next.books[0] || null);
-    } catch (e: any) {
-      setReadError(e.message);
+      await reloadMine();
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
   async function finishReading(item: ReadingItem) {
     try {
       await api(`/api/me/reading/${item.book_id}/finish`, { method: "POST", body: "{}" });
-      const [r, w, g, next] = await Promise.all([
-        api<{ books: Book[] }>("/api/me/books"),
-        api<{ books: WishlistItem[] }>("/api/me/wishlist"),
-        api<{ books: ReadingItem[] }>("/api/me/reading"),
-        api<{ books: NextUpItem[] }>("/api/me/next-up"),
-      ]);
-      setBooks(r.books);
-      setWish(w.books);
-      setReading(g.books);
-      setNextUp(next.books[0] || null);
-    } catch (e: any) {
-      setReadError(e.message);
+      await reloadMine();
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
   async function backToWishlist(item: ReadingItem) {
     try {
       await api(`/api/me/reading/${item.book_id}/back-to-wishlist`, { method: "POST", body: "{}" });
-      const [r, w, g, next] = await Promise.all([
-        api<{ books: Book[] }>("/api/me/books"),
-        api<{ books: WishlistItem[] }>("/api/me/wishlist"),
-        api<{ books: ReadingItem[] }>("/api/me/reading"),
-        api<{ books: NextUpItem[] }>("/api/me/next-up"),
-      ]);
-      setBooks(r.books);
-      setWish(w.books);
-      setReading(g.books);
-      setNextUp(next.books[0] || null);
-    } catch (e: any) {
-      setReadError(e.message);
+      await reloadMine();
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
   async function moveToRead(item: WishlistItem) {
     try {
       await api(`/api/me/wishlist/${item.book_id}/move-to-read`, { method: "POST", body: "{}" });
-      const [r, w, g] = await Promise.all([
-        api<{ books: Book[] }>("/api/me/books"),
-        api<{ books: WishlistItem[] }>("/api/me/wishlist"),
-        api<{ books: ReadingItem[] }>("/api/me/reading"),
-      ]);
-      setBooks(r.books);
-      setWish(w.books);
-      setReading(g.books);
-    } catch (e: any) {
-      setReadError(e.message);
+      await reloadMine();
+    } catch (e) {
+      setReadError(errorMessage(e));
     }
   }
 
@@ -257,7 +218,7 @@ export default function Profile({ username, me, onBack }: Props) {
     api("/api/me/books/reorder", {
       method: "POST",
       body: JSON.stringify({ ordered: newOrder.map((b) => b.book_id) }),
-    }).catch((e: any) => setReadError(e.message));
+    }).catch((e) => setReadError(errorMessage(e)));
   }
 
   function handleWishReorder(newOrder: WishlistItem[]) {
@@ -265,16 +226,16 @@ export default function Profile({ username, me, onBack }: Props) {
     api("/api/me/wishlist/reorder", {
       method: "POST",
       body: JSON.stringify({ ordered: newOrder.map((b) => b.book_id) }),
-    }).catch((e: any) => setReadError(e.message));
+    }).catch((e) => setReadError(errorMessage(e)));
   }
 
   async function addWish(bookId: number) {
     setWishStatus((s) => ({ ...s, [bookId]: "Adding…" }));
     try {
       await api("/api/me/wishlist", { method: "POST", body: JSON.stringify({ book_id: bookId }) });
-      setWishStatus((s) => ({ ...s, [bookId]: "Saved ✓" }));
-    } catch (e: any) {
-      setWishStatus((s) => ({ ...s, [bookId]: e.message }));
+      setWishStatus((s) => ({ ...s, [bookId]: "Saved" }));
+    } catch (e) {
+      setWishStatus((s) => ({ ...s, [bookId]: errorMessage(e) }));
     }
   }
 
@@ -282,9 +243,9 @@ export default function Profile({ username, me, onBack }: Props) {
     setReadingStatus((s) => ({ ...s, [bookId]: "Adding…" }));
     try {
       await api("/api/me/reading", { method: "POST", body: JSON.stringify({ book_id: bookId }) });
-      setReadingStatus((s) => ({ ...s, [bookId]: "Reading ✓" }));
-    } catch (e: any) {
-      setReadingStatus((s) => ({ ...s, [bookId]: e.message }));
+      setReadingStatus((s) => ({ ...s, [bookId]: "Reading" }));
+    } catch (e) {
+      setReadingStatus((s) => ({ ...s, [bookId]: errorMessage(e) }));
     }
   }
 
@@ -292,32 +253,44 @@ export default function Profile({ username, me, onBack }: Props) {
     if (isSelf) return null;
 
     if (mine === "reading") {
-      return <span className="added muted-text">In your reading</span>;
+      return <span className="muted">In your reading</span>;
     }
 
     const r = readingStatus[bookId];
     const w = wishStatus[bookId];
 
     const readingBtn =
-      r === "Reading ✓" ? (
-        <span className="added">Reading ✓</span>
+      r === "Reading" ? (
+        <span className="success-text">Reading</span>
       ) : r && r !== "Adding…" ? (
-        <span className="added error-text">{r}</span>
+        <span className="error-text">{r}</span>
       ) : (
-        <button className="secondary" onClick={() => addReading(bookId)} disabled={r === "Adding…"}>
-          {r === "Adding…" ? "…" : "📖 Reading"}
+        <button type="button" onClick={() => addReading(bookId)} disabled={r === "Adding…"}>
+          {r === "Adding…" ? (
+            "…"
+          ) : (
+            <>
+              <IconBook /> Reading
+            </>
+          )}
         </button>
       );
 
-    let wishBtn;
-    if (mine === "read") wishBtn = <span className="added muted-text">In your books</span>;
-    else if (mine === "wish") wishBtn = <span className="added muted-text">In your wishlist</span>;
-    else if (w === "Saved ✓") wishBtn = <span className="added">Saved ✓</span>;
-    else if (w && w !== "Adding…") wishBtn = <span className="added error-text">{w}</span>;
+    let wishBtn: React.ReactNode;
+    if (mine === "read") wishBtn = <span className="muted">In your books</span>;
+    else if (mine === "wish") wishBtn = <span className="muted">In your wishlist</span>;
+    else if (w === "Saved") wishBtn = <span className="success-text">Saved</span>;
+    else if (w && w !== "Adding…") wishBtn = <span className="error-text">{w}</span>;
     else
       wishBtn = (
-        <button className="secondary" onClick={() => addWish(bookId)} disabled={w === "Adding…"}>
-          {w === "Adding…" ? "…" : "♡ Wishlist"}
+        <button type="button" onClick={() => addWish(bookId)} disabled={w === "Adding…"}>
+          {w === "Adding…" ? (
+            "…"
+          ) : (
+            <>
+              <IconHeart /> Wishlist
+            </>
+          )}
         </button>
       );
 
@@ -333,9 +306,7 @@ export default function Profile({ username, me, onBack }: Props) {
     <div className="page">
       {readError && (
         <div className="error">
-          {isSelf
-            ? readError
-            : `You're not friends with @${username} yet. Add them in "Friends" to see their books.`}
+          {isSelf ? readError : `You're not friends with @${username} yet. Add them in "Friends" to see their books.`}
         </div>
       )}
 
@@ -343,20 +314,18 @@ export default function Profile({ username, me, onBack }: Props) {
         <section className="card">
           <h2 className="section-title">Currently reading</h2>
           {reading === null ? (
-            <div className="muted">Loading…</div>
+            <div className="loading">Loading…</div>
           ) : reading.length === 0 ? (
             <div className="empty muted">
-              {isSelf ? 'Nothing here. Mark a book "Reading" to track what you\'re on.' : `@${username} isn't reading anything right now.`}
+              {isSelf
+                ? 'Nothing here. Mark a book "Reading" to track what you\'re on.'
+                : `@${username} isn't reading anything right now.`}
             </div>
           ) : (
             <ul className="book-list">
               {reading.map((b) => (
                 <li key={b.book_id} className="book-row">
-                  {b.cover_url ? (
-                    <img className="cover" src={b.cover_url} alt="" />
-                  ) : (
-                    <span className="cover no-cover">📚</span>
-                  )}
+                  <Cover url={b.cover_url} />
                   <div className="info">
                     <div className="title">
                       <a href={`#/book/${b.book_id}`} className="book-title-link">
@@ -364,21 +333,34 @@ export default function Profile({ username, me, onBack }: Props) {
                       </a>
                       {b.manual ? <span className="badge">manual</span> : null}
                     </div>
-                    <div className="author">
-                      {b.author || "Unknown author"}
-                      {b.first_publish_year ? ` · ${b.first_publish_year}` : ""}
-                    </div>
+                    <Byline author={b.author} year={b.first_publish_year} />
                   </div>
                   {isSelf ? (
                     <div className="actions">
-                      <button className="btn-sm" onClick={() => finishReading(b)} title="Finished — move to Books read">
+                      <button
+                        type="button"
+                        className="btn-sm"
+                        onClick={() => finishReading(b)}
+                        title="Finished — move to Books read"
+                      >
                         Finished
                       </button>
-                      <button className="secondary btn-sm" onClick={() => backToWishlist(b)} title="Back to wishlist">
-                        ↩ Wishlist
+                      <button
+                        type="button"
+                        className="btn-sm"
+                        onClick={() => backToWishlist(b)}
+                        title="Back to wishlist"
+                      >
+                        <IconUndo /> Wishlist
                       </button>
-                      <button className="danger btn-sm" onClick={() => removeReading(b.book_id)} title="Remove">
-                        ✕
+                      <button
+                        type="button"
+                        className="icon-btn remove"
+                        onClick={() => removeReading(b.book_id)}
+                        title="Remove"
+                        aria-label="Remove"
+                      >
+                        <IconX />
                       </button>
                     </div>
                   ) : (
@@ -391,16 +373,10 @@ export default function Profile({ username, me, onBack }: Props) {
 
           {isSelf && nextUp && (
             <>
-              <h3 className="section-title" style={{ marginTop: "1.5rem", fontSize: "0.95rem" }}>
-                Next up
-              </h3>
+              <h3 className="subsection-title">Next up</h3>
               <ul className="book-list">
                 <li className="book-row">
-                  {nextUp.cover_url ? (
-                    <img className="cover" src={nextUp.cover_url} alt="" />
-                  ) : (
-                    <span className="cover no-cover">📚</span>
-                  )}
+                  <Cover url={nextUp.cover_url} />
                   <div className="info">
                     <div className="title">
                       <a href={`#/book/${nextUp.book_id}`} className="book-title-link">
@@ -408,23 +384,21 @@ export default function Profile({ username, me, onBack }: Props) {
                       </a>
                       {nextUp.manual ? <span className="badge">manual</span> : null}
                     </div>
+                    <Byline author={nextUp.author} year={nextUp.first_publish_year} />
                     <div className="author">
-                      {nextUp.author || "Unknown author"}
-                      {nextUp.first_publish_year ? ` · ${nextUp.first_publish_year}` : ""}
-                    </div>
-                    <div className="author muted-text">
                       {nextUp.reason === "owned"
-                        ? `📖 You own this · #${nextUp.rank} on wishlist`
-                        : `👤 @${nextUp.friendUsername} has this · #${nextUp.rank} on wishlist`}
+                        ? `You own this · #${nextUp.rank} on wishlist`
+                        : `@${nextUp.friendUsername} has this · #${nextUp.rank} on wishlist`}
                     </div>
                   </div>
                   <div className="actions">
                     <button
-                      className="secondary btn-sm"
+                      type="button"
+                      className="btn-sm"
                       onClick={() => startReadingFromNextUp(nextUp.book_id)}
                       title="Start reading"
                     >
-                      📖 Reading
+                      <IconBook /> Reading
                     </button>
                   </div>
                 </li>
@@ -438,7 +412,7 @@ export default function Profile({ username, me, onBack }: Props) {
         <section className="card">
           <h2 className="section-title">Books read</h2>
           {books === null ? (
-            <div className="muted">Loading…</div>
+            <div className="loading">Loading…</div>
           ) : books.length === 0 ? (
             <div className="empty muted">
               {isSelf ? 'No books yet. Add some from the "Add Book" page.' : "No public books yet."}
@@ -469,21 +443,14 @@ export default function Profile({ username, me, onBack }: Props) {
               {books.map((b, i) => (
                 <li key={b.book_id} className="book-row">
                   <span className="rank">#{i + 1}</span>
-                  {b.cover_url ? (
-                    <img className="cover" src={b.cover_url} alt="" />
-                  ) : (
-                    <span className="cover no-cover">📚</span>
-                  )}
+                  <Cover url={b.cover_url} />
                   <div className="info">
                     <div className="title">
                       <a href={`#/book/${b.book_id}`} className="book-title-link">
                         {b.title}
                       </a>
                     </div>
-                    <div className="author">
-                      {b.author || "Unknown author"}
-                      {b.first_publish_year ? ` · ${b.first_publish_year}` : ""}
-                    </div>
+                    <Byline author={b.author} year={b.first_publish_year} />
                     {b.review && <div className="review-text">{b.review}</div>}
                   </div>
                   <div className="actions">{actions(b.book_id, b.mine)}</div>
@@ -498,11 +465,13 @@ export default function Profile({ username, me, onBack }: Props) {
         <section className="card">
           <h2 className="section-title">Wishlist</h2>
           {wish === null ? (
-            <div className="muted">Loading…</div>
+            <div className="loading">Loading…</div>
           ) : wish.length === 0 ? (
             <div className="empty">
               <p className="muted">
-                {isSelf ? 'Nothing here yet. Add a friend\'s book, or search and pick "♡ Wishlist".' : `@${username} has no public wishlist items yet.`}
+                {isSelf
+                  ? 'Nothing here yet. Add a friend\'s book, or search and pick "Wishlist".'
+                  : `@${username} has no public wishlist items yet.`}
               </p>
             </div>
           ) : isSelf ? (
@@ -524,11 +493,7 @@ export default function Profile({ username, me, onBack }: Props) {
             <ul className="book-list">
               {wish.map((b) => (
                 <li key={b.book_id} className="book-row">
-                  {b.cover_url ? (
-                    <img className="cover" src={b.cover_url} alt="" />
-                  ) : (
-                    <span className="cover no-cover">📚</span>
-                  )}
+                  <Cover url={b.cover_url} />
                   <div className="info">
                     <div className="title">
                       <a href={`#/book/${b.book_id}`} className="book-title-link">
@@ -536,11 +501,8 @@ export default function Profile({ username, me, onBack }: Props) {
                       </a>
                       {b.manual ? <span className="badge">manual</span> : null}
                     </div>
-                    <div className="author">
-                      {b.author || "Unknown author"}
-                      {b.first_publish_year ? ` · ${b.first_publish_year}` : ""}
-                    </div>
-                    {b.owned ? <div className="author muted-text">Owned</div> : null}
+                    <Byline author={b.author} year={b.first_publish_year} />
+                    {b.owned ? <div className="author">Owned</div> : null}
                   </div>
                   <div className="actions">{actions(b.book_id, b.mine)}</div>
                 </li>
@@ -552,6 +514,8 @@ export default function Profile({ username, me, onBack }: Props) {
     </div>
   );
 }
+
+const DRAGGING = { scale: 1.02, zIndex: 10, boxShadow: "0 12px 28px rgba(0,0,0,0.15)" };
 
 function ReadItem({
   book,
@@ -586,11 +550,7 @@ function ReadItem({
       dragListener={false}
       dragControls={controls}
       className="book-row"
-      whileDrag={{
-        scale: 1.02,
-        zIndex: 10,
-        boxShadow: "0 12px 28px rgba(0,0,0,0.15)",
-      }}
+      whileDrag={DRAGGING}
     >
       <button
         type="button"
@@ -599,44 +559,28 @@ function ReadItem({
         title="Drag to reorder"
         aria-label="Drag to reorder"
       >
-        ⠿
+        <IconGrip size={18} />
       </button>
       <span className="rank">#{index + 1}</span>
-      {book.cover_url ? (
-        <img className="cover" src={book.cover_url} alt="" />
-      ) : (
-        <span className="cover no-cover">📚</span>
-      )}
+      <Cover url={book.cover_url} />
       <div className="info">
         <div className="title">
-          <a
-            href={`#/book/${book.book_id}`}
-            onClick={(e) => {
-              e.preventDefault();
-              window.location.hash = `#/book/${book.book_id}`;
-            }}
-            className="book-title-link"
-          >
+          <a href={`#/book/${book.book_id}`} className="book-title-link">
             {book.title}
           </a>
           {book.manual ? <span className="badge">manual</span> : null}
-          {book.isReading ? <span className="badge reading">📖 reading</span> : null}
+          {book.isReading ? <span className="badge accent">Reading</span> : null}
         </div>
-        <div className="author">
-          {book.author || "Unknown author"}
-          {book.first_publish_year ? ` · ${book.first_publish_year}` : ""}
-        </div>
+        <Byline author={book.author} year={book.first_publish_year} />
         <button
           type="button"
-          className={"review-toggle" + (reviewOpen ? " open" : "")}
+          className={`review-toggle${reviewOpen ? " open" : ""}`}
           onClick={() => setReviewOpen((o) => !o)}
         >
           {reviewOpen ? "Hide review" : review.trim() ? "Edit review" : "Add review"}
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 15.5 4.5 8l1.4-1.4L12 12.7l6.1-6.1L19.5 8z" />
-          </svg>
+          <IconChevronDown size={12} />
         </button>
-        <div className={"review-box" + (reviewOpen ? " open" : "")}>
+        <div className={`review-box${reviewOpen ? " open" : ""}`}>
           <textarea
             className="review"
             value={review}
@@ -644,7 +588,7 @@ function ReadItem({
             onChange={(e) => reviewOnChange(e.target.value)}
           />
           {dirty && (
-            <button className="save-review" onClick={onSaveReview} disabled={saving}>
+            <button type="button" className="save-review" onClick={onSaveReview} disabled={saving}>
               {saving ? "Saving…" : "Save review"}
             </button>
           )}
@@ -652,28 +596,20 @@ function ReadItem({
       </div>
       <div className="actions actions-col">
         <div className="public-col">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={!!book.public}
-            className={"switch sm" + (book.public ? " on" : "")}
-            onClick={() => onTogglePublic(!book.public)}
-            title="Visible to friends"
-          >
-            <span className="knob" />
-          </button>
-          <span className="muted small-label">{book.public ? "Public" : "Private"}</span>
+          <Switch checked={!!book.public} onChange={onTogglePublic} title="Visible to friends" />
+          <span className="small-label">{book.public ? "Public" : "Private"}</span>
         </div>
         <button
-          className="secondary btn-sm"
+          type="button"
+          className="btn-sm"
           onClick={onStartReading}
           title={book.isReading ? "Already currently reading" : "Currently reading"}
           disabled={book.isReading}
         >
-          {book.isReading ? "✓ Reading" : "📖 Reading"}
+          {book.isReading ? <IconCheck /> : <IconBook />} Reading
         </button>
-        <button className="danger btn-sm" onClick={onRemove} title="Remove">
-          ✕
+        <button type="button" className="icon-btn remove" onClick={onRemove} title="Remove" aria-label="Remove">
+          <IconX />
         </button>
       </div>
     </Reorder.Item>
@@ -706,11 +642,7 @@ function WishItem({
       dragListener={false}
       dragControls={controls}
       className="book-row"
-      whileDrag={{
-        scale: 1.02,
-        zIndex: 10,
-        boxShadow: "0 12px 28px rgba(0,0,0,0.15)",
-      }}
+      whileDrag={DRAGGING}
     >
       <button
         type="button"
@@ -719,66 +651,34 @@ function WishItem({
         title="Drag to reorder"
         aria-label="Drag to reorder"
       >
-        ⠿
+        <IconGrip size={18} />
       </button>
       <span className="rank">#{index + 1}</span>
-      {item.cover_url ? (
-        <img className="cover" src={item.cover_url} alt="" />
-      ) : (
-        <span className="cover no-cover">📚</span>
-      )}
+      <Cover url={item.cover_url} />
       <div className="info">
         <div className="title">
-          <a
-            href={`#/book/${item.book_id}`}
-            onClick={(e) => {
-              e.preventDefault();
-              window.location.hash = `#/book/${item.book_id}`;
-            }}
-            className="book-title-link"
-          >
+          <a href={`#/book/${item.book_id}`} className="book-title-link">
             {item.title}
           </a>
           {item.manual ? <span className="badge">manual</span> : null}
         </div>
-        <div className="author">
-          {item.author || "Unknown author"}
-          {item.first_publish_year ? ` · ${item.first_publish_year}` : ""}
-        </div>
-        <div className="owned-row">
+        <Byline author={item.author} year={item.first_publish_year} />
+        <div className="toggle-row">
           <span className="muted">Owned</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={!!item.owned}
-            className={"switch sm" + (item.owned ? " on" : "")}
-            onClick={onToggleOwned}
-            title="Mark as owned"
-          >
-            <span className="knob" />
-          </button>
+          <Switch checked={!!item.owned} onChange={onToggleOwned} title="Mark as owned" />
           <span className="muted">Public</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={!!item.public}
-            className={"switch sm" + (item.public ? " on" : "")}
-            onClick={onTogglePublic}
-            title="Visible to friends"
-          >
-            <span className="knob" />
-          </button>
+          <Switch checked={!!item.public} onChange={onTogglePublic} title="Visible to friends" />
         </div>
       </div>
       <div className="actions actions-col">
-        <button className="secondary btn-sm" onClick={onStartReading} title="Start reading">
-          📖 Reading
+        <button type="button" className="btn-sm" onClick={onStartReading} title="Start reading">
+          <IconBook /> Reading
         </button>
-        <button className="btn-sm" onClick={onMoveToRead} title="Finished — move to Books read">
+        <button type="button" className="btn-sm" onClick={onMoveToRead} title="Finished — move to Books read">
           Finished
         </button>
-        <button className="danger btn-sm" onClick={onRemove} title="Remove">
-          ✕
+        <button type="button" className="icon-btn remove" onClick={onRemove} title="Remove" aria-label="Remove">
+          <IconX />
         </button>
       </div>
     </Reorder.Item>
