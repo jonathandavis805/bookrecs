@@ -233,7 +233,7 @@ function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
       setAuthor("");
       setYear("");
       setCoverUrl("");
-      setIsPublic(target === "read");
+      setIsPublic(true);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -246,27 +246,13 @@ function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
       <h3 className="section-title">Can't find your book? Add it manually</h3>
 
       <div className="segmented">
-        <button
-          type="button"
-          className={target === "read" ? "active" : ""}
-          onClick={() => {
-            setTarget("read");
-            setIsPublic(true);
-          }}
-        >
+        <button type="button" className={target === "read" ? "active" : ""} onClick={() => setTarget("read")}>
           My Books
         </button>
         <button type="button" className={target === "reading" ? "active" : ""} onClick={() => setTarget("reading")}>
           Reading
         </button>
-        <button
-          type="button"
-          className={target === "wish" ? "active" : ""}
-          onClick={() => {
-            setTarget("wish");
-            setIsPublic(false);
-          }}
-        >
+        <button type="button" className={target === "wish" ? "active" : ""} onClick={() => setTarget("wish")}>
           Wishlist
         </button>
       </div>

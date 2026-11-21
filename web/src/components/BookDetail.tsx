@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type Book, errorMessage } from "../api";
 import { Byline } from "./ui/Book";
-import { IconBook, IconChevronLeft, IconChevronRight, IconHeart } from "./ui/icons";
+import { IconBook, IconHeart } from "./ui/icons";
 
 interface FriendActivity {
   username: string;
@@ -11,15 +11,24 @@ interface FriendActivity {
   status: "read" | "wishlist" | "reading";
 }
 
-interface BookDetail extends Book {
+interface MyActivity {
+  read: { rank: number; review: string | null; listened: number; public: number } | null;
+  wishlist: { rank: number; owned: number; public: number } | null;
+  reading: { listening: number } | null;
+}
+
+interface BookDetail extends Omit<Book, "mine"> {
   friends: FriendActivity[];
+  mine: MyActivity;
 }
 
 export default function BookDetail({ bookId }: { bookId: number }) {
   const [book, setBook] = useState<BookDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [reviewIndex, setReviewIndex] = useState(0);
+  const [actionError, setActionError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [review, setReview] = useState("");
   const [showAddCover, setShowAddCover] = useState(false);
   const [coverUrl, setCoverUrl] = useState("");
 
@@ -38,22 +47,32 @@ export default function BookDetail({ bookId }: { bookId: number }) {
     }
   }
 
-  const loadBook = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await api<{ book: BookDetail }>(`/api/books/${bookId}`);
-      setBook(data.book);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setLoading(false);
-    }
+  const refresh = useCallback(async () => {
+    const data = await api<{ book: BookDetail }>(`/api/books/${bookId}`);
+    setBook(data.book);
+    setReview(data.book.mine.read?.review ?? "");
   }, [bookId]);
 
   useEffect(() => {
-    loadBook();
-  }, [loadBook]);
+    setLoading(true);
+    setError("");
+    refresh()
+      .catch((e) => setError(errorMessage(e)))
+      .finally(() => setLoading(false));
+  }, [refresh]);
+
+  async function act(path: string, method: string, body: object) {
+    setBusy(true);
+    setActionError("");
+    try {
+      await api(path, { method, body: JSON.stringify(body) });
+      await refresh();
+    } catch (e) {
+      setActionError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (loading) {
     return <div className="loading">Loading…</div>;
@@ -67,20 +86,11 @@ export default function BookDetail({ bookId }: { bookId: number }) {
     );
   }
 
-  const friendsWithReviews = book.friends.filter((f) => f.review && f.status === "read");
-  const friendsReading = book.friends.filter((f) => f.status === "reading");
-  const friendsWishlist = book.friends.filter((f) => f.status === "wishlist");
-  const friendsRead = book.friends.filter((f) => f.status === "read");
-
-  function nextReview() {
-    if (friendsWithReviews.length === 0) return;
-    setReviewIndex((reviewIndex + 1) % friendsWithReviews.length);
-  }
-
-  function prevReview() {
-    if (friendsWithReviews.length === 0) return;
-    setReviewIndex((reviewIndex - 1 + friendsWithReviews.length) % friendsWithReviews.length);
-  }
+  const { mine } = book;
+  const onAnyList = mine.read || mine.wishlist || mine.reading;
+  const reviewDirty = review !== (mine.read?.review ?? "");
+  const friends = new Map<string, FriendActivity[]>();
+  for (const f of book.friends) friends.set(f.username, [...(friends.get(f.username) ?? []), f]);
 
   return (
     <div className="page">
@@ -109,7 +119,7 @@ export default function BookDetail({ bookId }: { bookId: number }) {
                   <div className="add-cover-buttons">
                     <button
                       type="button"
-                      className="btn-sm"
+                      className="btn-secondary btn-sm"
                       onClick={() => {
                         setShowAddCover(false);
                         setCoverUrl("");
@@ -135,6 +145,50 @@ export default function BookDetail({ bookId }: { bookId: number }) {
               {book.manual ? <span className="badge">manual</span> : null}
             </div>
             <Byline author={book.author} year={book.first_publish_year} />
+            <div className="my-lists">
+              {mine.read && (
+                <span className="badge accent">
+                  Read #{mine.read.rank}
+                  {mine.read.listened ? " · Listened" : ""}
+                </span>
+              )}
+              {mine.reading && (
+                <span className="badge accent">
+                  <IconBook size={12} /> {mine.reading.listening ? "Listening" : "Reading"}
+                </span>
+              )}
+              {mine.wishlist && <WishlistBadge owned={!!mine.wishlist.owned} />}
+              {!onAnyList && <span className="muted">Not on your lists yet</span>}
+            </div>
+            {!(mine.reading && (mine.read || mine.wishlist)) && (
+              <div className="my-list-actions">
+                {!mine.reading && (
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    disabled={busy}
+                    onClick={() =>
+                      mine.wishlist
+                        ? act("/api/me/reading/from-wishlist", "POST", { book_id: book.id })
+                        : act("/api/me/reading", "POST", { book_id: book.id })
+                    }
+                  >
+                    <IconBook /> Start reading
+                  </button>
+                )}
+                {!onAnyList && (
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    disabled={busy}
+                    onClick={() => act("/api/me/wishlist", "POST", { book_id: book.id })}
+                  >
+                    <IconHeart /> Add to wishlist
+                  </button>
+                )}
+              </div>
+            )}
+            {actionError && <div className="error-text">{actionError}</div>}
           </div>
         </div>
       </section>
@@ -144,139 +198,93 @@ export default function BookDetail({ bookId }: { bookId: number }) {
           <div className="card-head">
             <h3>Synopsis</h3>
           </div>
-          <div className="book-row">
-            <div className="info">
-              <p className="synopsis-text">{book.synopsis}</p>
-            </div>
-          </div>
+          <p className="synopsis-text">{book.synopsis}</p>
         </section>
       )}
 
-      {friendsReading.length > 0 && (
+      {mine.read && (
         <section className="card">
           <div className="card-head">
-            <h3>Currently Reading</h3>
-            <p className="muted">
-              {friendsReading.length} friend{friendsReading.length !== 1 ? "s" : ""}
-            </p>
+            <h3>My Review</h3>
           </div>
-          <ul className="book-list">
-            {friendsReading.map((friend) => (
-              <li key={friend.username} className="book-row">
-                <div className="info">
-                  <div className="title">
-                    <span className="friend-name">{friend.username}</span>
-                  </div>
-                  <div className="author">Currently reading</div>
-                </div>
-                <div className="actions">
-                  <span className="badge accent">
-                    <IconBook size={12} /> Reading
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {friendsWithReviews.length > 0 && (
-        <section className="card">
-          <div className="card-head">
-            <h3>Reviews</h3>
-            <p className="muted">
-              {reviewIndex + 1} of {friendsWithReviews.length} review{friendsWithReviews.length !== 1 ? "s" : ""}
-            </p>
-          </div>
-          <ul className="book-list">
-            <li className="book-row review-row">
-              <div className="info">
-                <div className="title">
-                  <span className="friend-name">{friendsWithReviews[reviewIndex].username}</span>
-                  <span className="review-rank">#{friendsWithReviews[reviewIndex].rank}</span>
-                </div>
-                <p className="review-text">{friendsWithReviews[reviewIndex].review}</p>
-              </div>
-            </li>
-          </ul>
-          {friendsWithReviews.length > 1 && (
-            <div className="review-nav">
-              <button type="button" className="btn-sm" onClick={prevReview}>
-                <IconChevronLeft /> Previous
-              </button>
-              <button type="button" className="btn-sm" onClick={nextReview}>
-                Next <IconChevronRight />
-              </button>
-            </div>
+          <textarea
+            className="review"
+            value={review}
+            placeholder="Write a review…"
+            onChange={(e) => setReview(e.target.value)}
+          />
+          {reviewDirty && (
+            <button
+              type="button"
+              className="save-review"
+              disabled={busy}
+              onClick={() => act(`/api/me/books/${book.id}`, "PATCH", { review })}
+            >
+              {busy ? "Saving…" : "Save review"}
+            </button>
           )}
         </section>
       )}
 
-      {friendsRead.length > 0 && (
-        <section className="card">
-          <div className="card-head">
-            <h3>Friends Who Read This</h3>
+      <section className="card">
+        <div className="card-head">
+          <h3>Friends</h3>
+          {friends.size > 0 && (
             <p className="muted">
-              {friendsRead.length} friend{friendsRead.length !== 1 ? "s" : ""}
+              {friends.size} friend{friends.size !== 1 ? "s" : ""}
             </p>
-          </div>
+          )}
+        </div>
+        {friends.size === 0 ? (
+          <div className="empty">None of your friends have this book yet.</div>
+        ) : (
           <ul className="book-list">
-            {friendsRead.map((friend) => (
-              <li key={friend.username} className="book-row">
+            {[...friends].map(([username, entries]) => (
+              <li key={username} className="book-row">
                 <div className="info">
-                  <div className="title">
-                    <span className="friend-name">{friend.username}</span>
+                  <div className="friend-book-head">
+                    <a className="user-link" href={`#/u/${encodeURIComponent(username)}`}>
+                      {username}
+                    </a>
+                    {entries.map((f) => (
+                      <FriendBadge key={f.status} entry={f} />
+                    ))}
                   </div>
-                  <div className="author">Read this book</div>
-                </div>
-                <div className="actions">
-                  <span className="rank">#{friend.rank}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {friendsWishlist.length > 0 && (
-        <section className="card">
-          <div className="card-head">
-            <h3>Friends Who Want to Read This</h3>
-            <p className="muted">
-              {friendsWishlist.length} friend{friendsWishlist.length !== 1 ? "s" : ""}
-            </p>
-          </div>
-          <ul className="book-list">
-            {friendsWishlist.map((friend) => (
-              <li key={friend.username} className="book-row">
-                <div className="info">
-                  <div className="title">
-                    <span className="friend-name">{friend.username}</span>
-                  </div>
-                  <div className="author">Wants to read</div>
-                </div>
-                <div className="actions">
-                  {friend.owned ? (
-                    <span className="badge success">Owned</span>
-                  ) : (
-                    <span className="badge">
-                      <IconHeart size={12} /> Wishlist
-                    </span>
+                  {entries.map(
+                    (f) =>
+                      f.review && (
+                        <div key={f.status} className="review-text">
+                          {f.review}
+                        </div>
+                      ),
                   )}
                 </div>
               </li>
             ))}
           </ul>
-        </section>
-      )}
-
-      {book.friends.length === 0 && (
-        <section className="card">
-          <div className="empty">
-            <p className="muted">None of your friends have this book yet.</p>
-          </div>
-        </section>
-      )}
+        )}
+      </section>
     </div>
   );
+}
+
+function WishlistBadge({ owned }: { owned: boolean }) {
+  return owned ? (
+    <span className="badge success">Owned</span>
+  ) : (
+    <span className="badge">
+      <IconHeart size={12} /> Wishlist
+    </span>
+  );
+}
+
+function FriendBadge({ entry }: { entry: FriendActivity }) {
+  if (entry.status === "read") return <span className="badge">Read #{entry.rank}</span>;
+  if (entry.status === "reading")
+    return (
+      <span className="badge accent">
+        <IconBook size={12} /> Reading
+      </span>
+    );
+  return <WishlistBadge owned={!!entry.owned} />;
 }

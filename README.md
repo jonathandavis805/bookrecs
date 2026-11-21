@@ -9,9 +9,10 @@ each other's books. One page shows your **currently reading**, **read list**, an
 reorder); keep a wishlist (mark each book **owned** or not), pull a friend's
 book straight into your wishlist, move a wishlist item into your read list when
 you finish it, and mark what you're **currently reading**. Read/wishlist books
-are each **public or private** (friends only see the public ones); your
-**currently reading** is always visible to friends. Click any book title to see
-its **detail page** with synopsis, friend activity, and review carousel.
+are each **public or private** (public by default; friends only see the public
+ones); your **currently reading** is always visible to friends. Click any book
+title to see its **detail page** with synopsis, your lists and review, and
+friends' activity and reviews.
 
 Start a **book club** with a group of friends: nominate books from Open
 Library, vote for the next read (one vote per member, changeable until the vote

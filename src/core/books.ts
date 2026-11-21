@@ -158,8 +158,16 @@ interface FriendActivity {
   status: "read" | "wishlist" | "reading";
 }
 
+// The viewer's own entries for the book, one per list it's on.
+interface MyActivity {
+  read: { rank: number; review: string | null; listened: number; public: number } | null;
+  wishlist: { rank: number; owned: number; public: number } | null;
+  reading: { listening: number } | null;
+}
+
 export interface BookDetail extends BookRow {
   friends: FriendActivity[];
+  mine: MyActivity;
 }
 
 export async function getBookDetail(db: D1Database, viewerId: number, bookId: number): Promise<BookDetail | null> {
@@ -181,7 +189,27 @@ export async function getBookDetail(db: D1Database, viewerId: number, bookId: nu
     viewerId,
     bookId,
   );
-  return { ...book, friends };
+  const [read, wishlist, reading] = await Promise.all([
+    queryOne<NonNullable<MyActivity["read"]>>(
+      db,
+      "SELECT rank, review, listened, public FROM reads WHERE user_id = ? AND book_id = ?",
+      viewerId,
+      bookId,
+    ),
+    queryOne<NonNullable<MyActivity["wishlist"]>>(
+      db,
+      "SELECT rank, owned, public FROM wishlist WHERE user_id = ? AND book_id = ?",
+      viewerId,
+      bookId,
+    ),
+    queryOne<NonNullable<MyActivity["reading"]>>(
+      db,
+      "SELECT listening FROM reading WHERE user_id = ? AND book_id = ?",
+      viewerId,
+      bookId,
+    ),
+  ]);
+  return { ...book, friends, mine: { read, wishlist, reading } };
 }
 
 export async function backfillSynopses(db: D1Database): Promise<{ updated: number; failed: number }> {

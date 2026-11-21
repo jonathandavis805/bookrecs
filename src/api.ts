@@ -416,7 +416,7 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
         : { bookId: optionalNumber(body.book_id), olKey: body.ol_key, year: optionalNumber(body.year) };
     const r = await core.addToWishlist(db, user.id, ref, {
       owned: !!body.owned,
-      isPublic: !!body.public,
+      isPublic: body.public,
       rank: optionalNumber(body.rank),
     });
     if (!r.ok) return failure(r);

@@ -26,7 +26,7 @@ const seg = (v: unknown) => encodeURIComponent(String(v ?? ""));
 const bookId = num("Book id, as returned by the list tools");
 const username = str("Friend's username");
 const rank = num("Optional 1-based position (defaults to the end)");
-const isPublic = bool("Visible to friends");
+const isPublic = bool("Visible to friends (default true)");
 const categoryIds = ids("Category ids, from my_categories");
 const manual = {
   title: str("Book title"),
