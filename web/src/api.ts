@@ -20,6 +20,7 @@ export interface Book {
   rank: number;
   review: string | null;
   public: number;
+  listened: number;
   created_at: number;
   updated_at: number;
   mine?: "read" | "wish" | "reading" | null;

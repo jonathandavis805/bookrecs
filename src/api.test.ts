@@ -230,6 +230,22 @@ describe("categories", () => {
   });
 });
 
+describe("listened", () => {
+  test("a read can be marked listened, and friends see the flag", async () => {
+    const alice = await signup("alice");
+    const id = (await alice.post("/api/books/manual", manual("Dune"))).data.book.id;
+    expect((await alice.get("/api/me/books")).data.books[0].listened).toBe(0);
+
+    const { data } = await alice.post(`/api/me/books/${id}/listened`, { listened: true });
+    expect(data.books[0].listened).toBe(1);
+
+    const bob = await signup("bob");
+    expect((await bob.post(`/api/me/books/${id}/listened`, { listened: true })).status).toBe(404);
+    await befriend(alice, bob, "bob");
+    expect((await bob.get("/api/friends/alice/books")).data.books[0].listened).toBe(1);
+  });
+});
+
 describe("friends", () => {
   test("friends see each other's public books; strangers get 403", async () => {
     const alice = await signup("alice");

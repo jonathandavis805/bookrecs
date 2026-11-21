@@ -338,6 +338,15 @@ textarea:focus {
   color: var(--muted);
 }
 
+.segmented.compact {
+  padding: 2px;
+}
+
+.segmented.compact button {
+  padding: 3px 8px;
+  font-size: var(--font-xs);
+}
+
 .segmented button:hover:not(.active, :disabled) {
   color: var(--text);
 }
@@ -376,6 +385,10 @@ textarea:focus {
 }
 
 /* ---------- Categories ---------- */
+.format-filter {
+  margin-bottom: 10px;
+}
+
 .category-bar {
   display: flex;
   flex-direction: column;

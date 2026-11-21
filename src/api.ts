@@ -357,6 +357,13 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     }
     return json({ books: await core.listReads(db, user.id) });
   }
+  const listened = path.match(/^\/api\/me\/books\/(\d+)\/listened$/);
+  if (listened && method === "POST") {
+    const body = await readBody(req);
+    const r = await core.setListened(db, user.id, Number(listened[1]), !!body.listened);
+    if (!r.ok) return failure(r);
+    return json({ books: await core.listReads(db, user.id) });
+  }
   if (readMatch && method === "DELETE") {
     await core.removeRead(db, user.id, Number(readMatch[1]));
     return json({ books: await core.listReads(db, user.id) });
