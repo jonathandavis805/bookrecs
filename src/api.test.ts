@@ -67,6 +67,18 @@ describe("auth", () => {
     expect((await as(login.cookie ?? "").get("/api/me")).data.user).toBeNull();
   });
 
+  test("the theme is saved to the account and returned with the user", async () => {
+    const alice = await signup("alice");
+    expect((await alice.get("/api/me")).data.user.theme).toBeNull();
+
+    const theme = { preset: "gruvbox", font: "mono" };
+    expect((await alice.post("/api/me/theme", { theme })).status).toBe(200);
+    expect((await alice.get("/api/me")).data.user.theme).toEqual(theme);
+
+    expect((await alice.post("/api/me/theme", { theme: "gruvbox" })).status).toBe(400);
+    expect((await alice.post("/api/me/theme", { theme: { junk: "x".repeat(5000) } })).status).toBe(400);
+  });
+
   test("the session cookie is Lax so other sites can't send it on POSTs", async () => {
     const res = await handleApi(
       db,

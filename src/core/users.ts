@@ -9,9 +9,10 @@ export interface User {
   book_limit: number;
   rejected_at: number | null;
   discoverable: number;
+  theme: string | null;
 }
 
-const USER_COLUMNS = "id, username, email, is_admin, status, book_limit, rejected_at, discoverable";
+const USER_COLUMNS = "id, username, email, is_admin, status, book_limit, rejected_at, discoverable, theme";
 
 export async function getUserById(db: D1Database, id: number): Promise<User | null> {
   return await queryOne<User>(db, `SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, id);
@@ -80,6 +81,10 @@ export async function discoverUsers(
     like,
     query ? 20 : 50,
   );
+}
+
+export async function setTheme(db: D1Database, userId: number, theme: string): Promise<void> {
+  await execute(db, "UPDATE users SET theme = ? WHERE id = ?", theme, userId);
 }
 
 export async function setDiscoverable(db: D1Database, userId: number, discoverable: boolean): Promise<void> {

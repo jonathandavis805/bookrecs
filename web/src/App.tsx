@@ -12,6 +12,7 @@ import Profile from "./components/Profile";
 import Settings from "./components/Settings";
 import UserMenu from "./components/UserMenu";
 import { IconBell } from "./components/ui/icons";
+import { adoptAccountTheme } from "./theme";
 
 type Route =
   | { name: "books" }
@@ -50,6 +51,10 @@ export default function App() {
       .then((d) => setUser(d.user))
       .catch(() => setUser(null));
   }, []);
+
+  useEffect(() => {
+    if (user) adoptAccountTheme(user.theme);
+  }, [user]);
 
   useEffect(() => {
     const onHash = () => setRoute(parseRoute());

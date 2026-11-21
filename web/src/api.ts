@@ -5,6 +5,7 @@ export interface User {
   is_admin: number;
   bookLimit: number | null; // null = unlimited
   discoverable?: boolean;
+  theme?: unknown; // validated by adoptAccountTheme
 }
 
 export interface Book {
