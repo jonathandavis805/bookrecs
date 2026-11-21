@@ -11,6 +11,7 @@ export default function Account({ user, onChangePassword }: AccountProps) {
   const [discoverable, setDiscoverable] = useState(Boolean(user.discoverable ?? true));
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [token, setToken] = useState("");
 
   useEffect(() => {
     api<{ discoverable: boolean }>("/api/me/privacy")
@@ -26,9 +27,17 @@ export default function Account({ user, onChangePassword }: AccountProps) {
         method: "POST",
         body: JSON.stringify({ discoverable: next }),
       });
-      setInfo(next ? "Your profile is now visible in Discover." : "Your profile is now hidden from Discover.");
+      setInfo(next ? "Others can now find you in friend search." : "You are now hidden from friend search.");
     } catch (e) {
       setDiscoverable(!next);
+      setError(errorMessage(e));
+    }
+  }
+
+  async function generateToken() {
+    try {
+      setToken((await api<{ token: string }>("/api/token", { method: "POST" })).token);
+    } catch (e) {
       setError(errorMessage(e));
     }
   }
@@ -66,6 +75,21 @@ export default function Account({ user, onChangePassword }: AccountProps) {
             </button>
           </div>
         </div>
+      </section>
+
+      <section className="card">
+        <h3 className="section-title">API token</h3>
+        <p className="muted">
+          Lets the BookRecs MCP server act as you (set it as BOOKRECS_TOKEN). Generating a new token replaces the old
+          one.
+        </p>
+        {token ? (
+          <code className="token">{token}</code>
+        ) : (
+          <button type="button" className="btn-secondary token-button" onClick={generateToken}>
+            Generate token
+          </button>
+        )}
       </section>
     </div>
   );

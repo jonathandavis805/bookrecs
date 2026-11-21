@@ -975,6 +975,20 @@ textarea:focus {
   gap: 12px;
 }
 
+.token {
+  display: block;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: var(--font-sm);
+  word-break: break-all;
+}
+
+.token-button {
+  margin-top: 10px;
+}
+
 .detail-label {
   min-width: 80px;
   color: var(--muted);

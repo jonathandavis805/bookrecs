@@ -17,11 +17,20 @@ interface Ctx {
   cookie: string;
 }
 
+// The response fields this script reads.
+interface ApiData {
+  error?: string;
+  results?: { key: string; title: string; year?: number }[];
+  clubs?: { id: number; name: string }[];
+  club?: { id: number; nominations: { id: number; title: string }[]; currentPick?: { title: string } };
+  invited?: string[];
+}
+
 async function call(
   path: string,
   init: RequestInit = {},
   cookie?: string,
-): Promise<{ ok: boolean; status: number; data: any; cookie?: string }> {
+): Promise<{ ok: boolean; status: number; data: ApiData; cookie?: string }> {
   const res = await fetch(BASE + path, {
     ...init,
     headers: {
@@ -30,7 +39,7 @@ async function call(
       ...(init.headers || {}),
     },
   });
-  const data = await res.json().catch(() => ({}));
+  const data = (await res.json().catch(() => ({}))) as ApiData;
   const setCookie = res.headers.get("set-cookie");
   return { ok: res.ok, status: res.status, data, cookie: setCookie ? setCookie.split(";")[0] : undefined };
 }
@@ -116,7 +125,7 @@ async function createClubIfMissing(
   description: string,
 ): Promise<number | null> {
   const list = await call("/api/clubs", {}, owner.cookie);
-  const existing = list.data.clubs?.find((c: any) => c.name === name);
+  const existing = list.data.clubs?.find((c) => c.name === name);
   if (existing) {
     console.log(`  club "${name}" already exists (#${existing.id}) — skipping`);
     return null;
@@ -133,11 +142,12 @@ async function createClubIfMissing(
     },
     owner.cookie,
   );
-  if (!r.ok) throw new Error(`createClub("${name}") failed: ${JSON.stringify(r.data)}`);
+  const club = r.data.club;
+  if (!r.ok || !club) throw new Error(`createClub("${name}") failed: ${JSON.stringify(r.data)}`);
   console.log(
-    `  ${owner.username} created club "${name}" (#${r.data.club.id}), invited: ${r.data.invited.join(", ") || "nobody"}`,
+    `  ${owner.username} created club "${name}" (#${club.id}), invited: ${r.data.invited?.join(", ") || "nobody"}`,
   );
-  return r.data.club.id;
+  return club.id;
 }
 
 async function acceptInvite(ctx: Ctx, clubId: number): Promise<void> {
@@ -156,7 +166,7 @@ async function acceptInvite(ctx: Ctx, clubId: number): Promise<void> {
 async function vote(ctx: Ctx, clubId: number, bookTitlePattern: string): Promise<void> {
   const d = await call(`/api/clubs/${clubId}`, {}, ctx.cookie);
   if (!d.ok) return;
-  const nom = d.data.club.nominations.find((n: any) => n.title.toLowerCase().includes(bookTitlePattern.toLowerCase()));
+  const nom = d.data.club?.nominations.find((n) => n.title.toLowerCase().includes(bookTitlePattern.toLowerCase()));
   if (!nom) {
     console.log(`  ! ${ctx.username} found no nomination matching "${bookTitlePattern}"`);
     return;
@@ -173,9 +183,16 @@ async function vote(ctx: Ctx, clubId: number, bookTitlePattern: string): Promise
   else console.log(`  ! ${ctx.username} vote failed: ${r.data.error}`);
 }
 
+// Clubs start in the nomination stage; the owner opens the vote.
+async function startVoting(owner: Ctx, clubId: number): Promise<void> {
+  const r = await call(`/api/clubs/${clubId}/start-voting`, { method: "POST" }, owner.cookie);
+  if (r.ok) console.log("  voting opened");
+  else console.log(`  ! start-voting failed: ${r.data.error}`);
+}
+
 async function closeVote(ctx: Ctx, clubId: number): Promise<void> {
   const r = await call(`/api/clubs/${clubId}/close-vote`, { method: "POST" }, ctx.cookie);
-  if (r.ok) console.log(`  vote closed — winner: "${r.data.pick?.title}"`);
+  if (r.ok) console.log(`  vote closed — winner: "${r.data.club?.currentPick?.title}"`);
   else console.log(`  ! close-vote failed: ${r.data.error}`);
 }
 
@@ -208,6 +225,7 @@ async function main() {
     await nominate(alice, sfId, "Dune Frank Herbert");
     await nominate(alice, sfId, "The Left Hand of Darkness");
     await nominate(carol, sfId, "Parable of the Sower");
+    await startVoting(alice, sfId);
     await vote(alice, sfId, "Dune");
     await vote(carol, sfId, "Parable");
     console.log(`  left as-is: bob's invite pending, vote tied 1-1 — log in as bob to accept and break the tie`);
@@ -221,6 +239,7 @@ async function main() {
     const n1 = await nominate(alice, classicsId, "Pride and Prejudice");
     const n2 = await nominate(alice, classicsId, "Frankenstein");
     if (n1 || n2) {
+      await startVoting(alice, classicsId);
       await vote(alice, classicsId, "Pride");
       await vote(carol, classicsId, "Pride");
       await closeVote(alice, classicsId);

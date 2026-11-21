@@ -83,6 +83,9 @@ interface ClubPick {
   picked_at: number;
 }
 
+// Mirrors ClubStage in src/core/clubs.ts.
+export type ClubStage = "nominating" | "voting" | "runoff" | "closed";
+
 export interface ClubSummary {
   id: number;
   name: string;
@@ -90,8 +93,7 @@ export interface ClubSummary {
   role: "owner" | "member";
   memberCount: number;
   invitedCount: number;
-  voting_open: number;
-  nominations_open: number;
+  stage: ClubStage;
   nominationCount: number;
   currentPick: ClubPick | null;
   created_at: number;
@@ -136,14 +138,11 @@ export interface ClubDetailData {
     name: string;
     description: string | null;
     creator_id: number;
-    voting_open: number;
-    nominations_open: number;
+    stage: ClubStage;
     created_at: number;
   };
   myRole: "owner" | "member";
-  votingOpen: boolean;
-  nominationsOpen: boolean;
-  runoff: boolean;
+  stage: ClubStage;
   members: ClubMember[];
   nominations: ClubNomination[];
   myVote: number | null;

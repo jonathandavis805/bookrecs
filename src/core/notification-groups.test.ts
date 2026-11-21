@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { groupNotifications, type NotificationRow } from "./notifications";
+import { groupNotifications, type NotificationRow } from "./notification-groups";
 
 let nextId = 1;
 function row(
