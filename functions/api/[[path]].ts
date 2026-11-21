@@ -34,12 +34,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     });
   } catch (err) {
     console.error("API error:", err);
-    return new Response(
-      JSON.stringify({ error: "Internal server error" }),
-      {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      }
-    );
+    return new Response(JSON.stringify({ error: "Internal server error" }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    });
   }
 };

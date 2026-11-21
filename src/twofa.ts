@@ -1,4 +1,4 @@
-import { queryOne, execute } from "./db";
+import { execute, queryOne } from "./db";
 
 const ISSUER = "BookRecs";
 
@@ -49,13 +49,7 @@ export function generateSecret(): string {
 }
 
 async function hmacSHA1(secret: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    secret,
-    { name: "HMAC", hash: "SHA-1" },
-    false,
-    ["sign"]
-  );
+  const key = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", key, message);
   return new Uint8Array(sig);
 }
@@ -64,15 +58,15 @@ async function generateTOTP(secret: Uint8Array, time?: number): Promise<string> 
   const period = 30;
   const digits = 6;
   const t = Math.floor((time ?? Date.now() / 1000) / period);
-  
+
   // Counter as 8-byte big-endian
   const buf = new Uint8Array(8);
   const view = new DataView(buf.buffer);
   view.setUint32(0, Math.floor(t / 0x100000000));
   view.setUint32(4, t & 0xffffffff);
-  
+
   const hmac = await hmacSHA1(secret, buf);
-  
+
   // Dynamic truncation
   const offset = hmac[hmac.length - 1] & 0x0f;
   const code =
@@ -80,8 +74,8 @@ async function generateTOTP(secret: Uint8Array, time?: number): Promise<string> 
     ((hmac[offset + 1] & 0xff) << 16) |
     ((hmac[offset + 2] & 0xff) << 8) |
     (hmac[offset + 3] & 0xff);
-  
-  const otp = code % Math.pow(10, digits);
+
+  const otp = code % 10 ** digits;
   return otp.toString().padStart(digits, "0");
 }
 
@@ -91,10 +85,10 @@ export function generateTOTPUri(username: string, secret: string): string {
   return `otpauth://totp/${encodedIssuer}:${encodedName}?secret=${secret}&issuer=${encodedIssuer}&algorithm=SHA1&digits=6&period=30`;
 }
 
-export async function verifyTOTP(username: string, secret: string, token: string): Promise<boolean> {
+export async function verifyTOTP(_username: string, secret: string, token: string): Promise<boolean> {
   const secretBytes = base32Decode(secret);
   const now = Math.floor(Date.now() / 1000);
-  
+
   // Check current period and ±1 period (window of 1)
   for (let offset = -1; offset <= 1; offset++) {
     const time = now + offset * 30;

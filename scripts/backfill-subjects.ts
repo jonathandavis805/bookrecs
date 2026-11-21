@@ -1,22 +1,20 @@
 #!/usr/bin/env bun
 /**
  * Backfill subjects cache for discover candidates
- * 
+ *
  * This script fetches OpenLibrary subjects for all books that don't have
  * cached subjects yet. Run this once to warm up the cache so the discover
  * endpoint is fast.
- * 
+ *
  * Usage: bun run scripts/backfill-subjects.ts
  */
 
 import { Database } from "bun:sqlite";
-import { resolve, dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const DB_PATH = process.env.BOOKRECS_DB
-  ? resolve(process.env.BOOKRECS_DB)
-  : resolve(REPO_ROOT, "data/bookrecs.sqlite");
+const DB_PATH = process.env.BOOKRECS_DB ? resolve(process.env.BOOKRECS_DB) : resolve(REPO_ROOT, "data/bookrecs.sqlite");
 
 const db = new Database(DB_PATH);
 const BASE = "https://openlibrary.org";
@@ -34,7 +32,7 @@ async function fetchSubjects(olKey: string): Promise<string[]> {
       headers: { "User-Agent": USER_AGENT },
     });
     if (!response.ok) return [];
-    
+
     const data = await response.json();
     return data.subjects || [];
   } catch (error) {
@@ -45,7 +43,7 @@ async function fetchSubjects(olKey: string): Promise<string[]> {
 
 async function backfill() {
   console.log("Finding books without cached subjects...");
-  
+
   const books = db
     .query("SELECT id, ol_key FROM books WHERE subjects IS NULL AND ol_key NOT LIKE 'manual:%'")
     .all() as BookRow[];
@@ -57,22 +55,20 @@ async function backfill() {
 
   for (const book of books) {
     process.stdout.write(`\rProcessing ${updated + failed + 1}/${books.length}: ${book.ol_key.substring(0, 50)}...`);
-    
+
     const subjects = await fetchSubjects(book.ol_key);
-    
+
     if (subjects.length > 0) {
-      db.query("UPDATE books SET subjects = ? WHERE id = ?")
-        .run(JSON.stringify(subjects), book.id);
+      db.query("UPDATE books SET subjects = ? WHERE id = ?").run(JSON.stringify(subjects), book.id);
       updated++;
     } else {
       // Store empty array so we don't retry
-      db.query("UPDATE books SET subjects = ? WHERE id = ?")
-        .run("[]", book.id);
+      db.query("UPDATE books SET subjects = ? WHERE id = ?").run("[]", book.id);
       failed++;
     }
 
     // Rate limiting: wait 100ms between requests
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
   console.log(`\n\nDone!`);
