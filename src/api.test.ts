@@ -158,6 +158,78 @@ describe("ranked lists", () => {
   });
 });
 
+describe("categories", () => {
+  async function shelf() {
+    const alice = await signup("alice");
+    const ids: Record<string, number> = {};
+    for (const t of ["Dune", "Emma", "Foundation", "Gatsby", "Hyperion"]) {
+      ids[t] = (await alice.post("/api/books/manual", manual(t))).data.book.id;
+    }
+    const scifi = (await alice.post("/api/me/categories", { name: "Sci-fi" })).data.category.id;
+    for (const t of ["Dune", "Foundation", "Hyperion"]) {
+      await alice.post(`/api/me/books/${ids[t]}/categories`, { category_ids: [scifi] });
+    }
+    return { alice, ids, scifi };
+  }
+
+  test("reordering a category moves only its books, within the slots they held", async () => {
+    const { alice, ids, scifi } = await shelf();
+    const { data } = await alice.post(`/api/me/categories/${scifi}/reorder`, { ordered: [ids.Hyperion] });
+    expect(titles(data.books)).toEqual(["Hyperion", "Emma", "Dune", "Gatsby", "Foundation"]);
+    expect(data.books.map((b: { rank: number }) => b.rank)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  test("global reorder carries into the category; removing a read or deleting a category cleans up", async () => {
+    const { alice, ids, scifi } = await shelf();
+    await alice.post("/api/me/books/reorder", { ordered: [ids.Foundation] });
+    let books = (await alice.get("/api/me/books")).data.books;
+    const inScifi = (bs: { title: string; category_ids: number[] }[]) =>
+      titles(bs.filter((b) => b.category_ids.includes(scifi)));
+    expect(inScifi(books)).toEqual(["Foundation", "Dune", "Hyperion"]);
+
+    books = (await alice.del(`/api/me/books/${ids.Dune}`)).data.books;
+    expect(inScifi(books)).toEqual(["Foundation", "Hyperion"]);
+
+    expect((await alice.del(`/api/me/categories/${scifi}`)).data.categories).toEqual([]);
+    books = (await alice.get("/api/me/books")).data.books;
+    expect(titles(books)).toEqual(["Foundation", "Emma", "Gatsby", "Hyperion"]);
+    expect(books.every((b: { category_ids: number[] }) => b.category_ids.length === 0)).toBe(true);
+  });
+
+  test("names are unique per user ignoring case, and other users' categories are off limits", async () => {
+    const { alice, ids, scifi } = await shelf();
+    expect((await alice.post("/api/me/categories", { name: " sci-FI " })).status).toBe(400);
+    expect((await alice.post("/api/me/categories", { name: "  " })).status).toBe(400);
+    expect((await alice.patch(`/api/me/categories/${scifi}`, { name: "SCI-FI" })).status).toBe(200);
+
+    const bob = await signup("bob");
+    expect((await bob.post("/api/me/categories", { name: "Sci-fi" })).status).toBe(200);
+    expect((await bob.del(`/api/me/categories/${scifi}`)).status).toBe(404);
+    expect((await bob.post(`/api/me/categories/${scifi}/reorder`, { ordered: [] })).status).toBe(404);
+
+    const { data } = await bob.post("/api/books/manual", { ...manual("Bob's"), category_ids: [scifi] });
+    expect(data.books[0].category_ids).toEqual([]);
+    expect((await bob.post(`/api/me/books/${ids.Dune}/categories`, { category_ids: [] })).status).toBe(404);
+  });
+
+  test("friends see categories with public books, holding only public books", async () => {
+    const { alice, ids, scifi } = await shelf();
+    const hidden = (await alice.post("/api/me/categories", { name: "Hidden" })).data.category.id;
+    await alice.post(`/api/me/books/${ids.Emma}/categories`, { category_ids: [hidden] });
+    await alice.post(`/api/me/books/${ids.Emma}/public`, { public: false });
+    await alice.post(`/api/me/books/${ids.Dune}/public`, { public: false });
+
+    const bob = await signup("bob");
+    await befriend(alice, bob, "bob");
+    const { data } = await bob.get("/api/friends/alice/books");
+    expect(data.categories).toEqual([{ id: scifi, name: "Sci-fi" }]);
+    expect(titles(data.books.filter((b: { category_ids: number[] }) => b.category_ids.includes(scifi)))).toEqual([
+      "Foundation",
+      "Hyperion",
+    ]);
+  });
+});
+
 describe("friends", () => {
   test("friends see each other's public books; strangers get 403", async () => {
     const alice = await signup("alice");

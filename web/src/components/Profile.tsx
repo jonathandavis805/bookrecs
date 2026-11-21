@@ -1,6 +1,16 @@
 import { Reorder, useDragControls } from "framer-motion";
 import { useEffect, useState } from "react";
-import { api, type Book, errorMessage, type NextUpItem, type ReadingItem, type User, type WishlistItem } from "../api";
+import {
+  api,
+  type Book,
+  type Category,
+  errorMessage,
+  type NextUpItem,
+  type ReadingItem,
+  type User,
+  type WishlistItem,
+} from "../api";
+import { CategoryAdder, CategoryBar, CategoryTags } from "./Categories";
 import { Byline, Cover } from "./ui/Book";
 import { IconBook, IconCheck, IconChevronDown, IconGrip, IconHeart, IconUndo, IconX } from "./ui/icons";
 import { Switch } from "./ui/Switch";
@@ -16,6 +26,8 @@ export default function Profile({ username, me }: Props) {
   const isSelf = username.toLowerCase() === me.username.toLowerCase();
 
   const [books, setBooks] = useState<Book[] | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [category, setCategory] = useState<number | null>(null);
   const [wish, setWish] = useState<WishlistItem[] | null>(null);
   const [reading, setReading] = useState<ReadingItem[] | null>(null);
   const [nextUp, setNextUp] = useState<NextUpItem | null>(null);
@@ -31,16 +43,19 @@ export default function Profile({ username, me }: Props) {
   useEffect(() => {
     let cancelled = false;
     setBooks(null);
+    setCategories([]);
+    setCategory(null);
     setWish(null);
     setReading(null);
     setNextUp(null);
     setReadError("");
 
     const readPath = isSelf ? "/api/me/books" : `/api/friends/${encodeURIComponent(username)}/books`;
-    api<{ books: Book[] }>(readPath)
+    api<{ books: Book[]; categories?: Category[] }>(readPath)
       .then((d) => {
         if (!cancelled) {
           setBooks(d.books);
+          setCategories(d.categories ?? []);
           if (isSelf) {
             const rv: Record<number, string> = {};
             d.books.forEach((b) => {
@@ -76,12 +91,13 @@ export default function Profile({ username, me }: Props) {
   // Refetches every list after a move between them; next-up depends on all three.
   async function reloadMine() {
     const [r, w, g, next] = await Promise.all([
-      api<{ books: Book[] }>("/api/me/books"),
+      api<{ books: Book[]; categories: Category[] }>("/api/me/books"),
       api<{ books: WishlistItem[] }>("/api/me/wishlist"),
       api<{ books: ReadingItem[] }>("/api/me/reading"),
       api<{ books: NextUpItem[] }>("/api/me/next-up"),
     ]);
     setBooks(r.books);
+    setCategories(r.categories);
     setWish(w.books);
     setReading(g.books);
     setNextUp(next.books[0] || null);
@@ -213,13 +229,59 @@ export default function Profile({ username, me }: Props) {
     }
   }
 
+  // Within a category, newOrder is just its books: they swap among the overall
+  // slots they hold, mirroring what the server does.
   function handleReadReorder(newOrder: Book[]) {
-    setBooks(newOrder);
-    api("/api/me/books/reorder", {
-      method: "POST",
-      body: JSON.stringify({ ordered: newOrder.map((b) => b.book_id) }),
-    }).catch((e) => setReadError(errorMessage(e)));
+    const ordered = JSON.stringify({ ordered: newOrder.map((b) => b.book_id) });
+    if (category === null) {
+      setBooks(newOrder);
+      api("/api/me/books/reorder", { method: "POST", body: ordered }).catch((e) => setReadError(errorMessage(e)));
+      return;
+    }
+    const members = new Set(newOrder.map((b) => b.book_id));
+    let next = 0;
+    setBooks((all) => (all ? all.map((b) => (members.has(b.book_id) ? newOrder[next++] : b)) : all));
+    api(`/api/me/categories/${category}/reorder`, { method: "POST", body: ordered }).catch((e) =>
+      setReadError(errorMessage(e)),
+    );
   }
+
+  async function setBookCategories(bookId: number, ids: number[]) {
+    setBooks((b) => (b ? b.map((x) => (x.book_id === bookId ? { ...x, category_ids: ids } : x)) : b));
+    try {
+      await api(`/api/me/books/${bookId}/categories`, { method: "POST", body: JSON.stringify({ category_ids: ids }) });
+    } catch (e) {
+      setReadError(errorMessage(e));
+    }
+  }
+
+  const categoryEdit = {
+    create: async (name: string) => {
+      const d = await api<{ category: Category; categories: Category[] }>("/api/me/categories", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      setCategories(d.categories);
+      setCategory(d.category.id);
+    },
+    rename: async (id: number, name: string) => {
+      const d = await api<{ categories: Category[] }>(`/api/me/categories/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      });
+      setCategories(d.categories);
+    },
+    remove: async (id: number) => {
+      const d = await api<{ categories: Category[] }>(`/api/me/categories/${id}`, { method: "DELETE" });
+      setCategories(d.categories);
+      setCategory(null);
+      setBooks((b) => (b ? b.map((x) => ({ ...x, category_ids: x.category_ids.filter((c) => c !== id) })) : b));
+    },
+  };
+
+  const shown = books && category !== null ? books.filter((b) => b.category_ids.includes(category)) : books;
+  // Only shown in a category view, where position in the category differs from overall.
+  const overall = (b: Book) => (category !== null && books ? books.indexOf(b) + 1 : undefined);
 
   function handleWishReorder(newOrder: WishlistItem[]) {
     setWish(newOrder);
@@ -411,19 +473,44 @@ export default function Profile({ username, me }: Props) {
       {!readError && (
         <section className="card">
           <h2 className="section-title">Books read</h2>
-          {books === null ? (
+          {books && books.length > 0 && (
+            <CategoryBar
+              categories={categories}
+              selected={category}
+              onSelect={setCategory}
+              edit={isSelf ? categoryEdit : undefined}
+            />
+          )}
+          {isSelf && books && shown && category !== null && (
+            <CategoryAdder
+              key={category}
+              name={categories.find((c) => c.id === category)?.name ?? ""}
+              books={books.filter((b) => !b.category_ids.includes(category))}
+              onAdd={(bookId) => {
+                const ids = books.find((b) => b.book_id === bookId)?.category_ids ?? [];
+                setBookCategories(bookId, [...ids, category]);
+              }}
+              startOpen={shown.length === 0}
+            />
+          )}
+          {books === null || shown === null ? (
             <div className="loading">Loading…</div>
           ) : books.length === 0 ? (
             <div className="empty muted">
               {isSelf ? 'No books yet. Add some from the "Add Book" page.' : "No public books yet."}
             </div>
+          ) : shown.length === 0 ? (
+            <div className="empty muted">No books in this category yet.</div>
           ) : isSelf ? (
-            <Reorder.Group axis="y" values={books} onReorder={handleReadReorder} className="book-list">
-              {books.map((b, i) => (
+            <Reorder.Group axis="y" values={shown} onReorder={handleReadReorder} className="book-list">
+              {shown.map((b, i) => (
                 <ReadItem
                   key={b.book_id}
                   book={b}
-                  index={i}
+                  rank={i + 1}
+                  overall={overall(b)}
+                  categories={categories}
+                  onSetCategories={(ids) => setBookCategories(b.book_id, ids)}
                   review={reviews[b.book_id] ?? ""}
                   dirty={!!dirty[b.book_id]}
                   saving={!!saving[b.book_id]}
@@ -440,7 +527,7 @@ export default function Profile({ username, me }: Props) {
             </Reorder.Group>
           ) : (
             <ol className="book-list">
-              {books.map((b, i) => (
+              {shown.map((b, i) => (
                 <li key={b.book_id} className="book-row">
                   <span className="rank">#{i + 1}</span>
                   <Cover url={b.cover_url} />
@@ -451,6 +538,8 @@ export default function Profile({ username, me }: Props) {
                       </a>
                     </div>
                     <Byline author={b.author} year={b.first_publish_year} />
+                    <OverallRank rank={overall(b)} />
+                    <CategoryTags categories={categories} ids={b.category_ids} />
                     {b.review && <div className="review-text">{b.review}</div>}
                   </div>
                   <div className="actions">{actions(b.book_id, b.mine)}</div>
@@ -517,9 +606,16 @@ export default function Profile({ username, me }: Props) {
 
 const DRAGGING = { scale: 1.02, zIndex: 10, boxShadow: "0 12px 28px rgba(0,0,0,0.15)" };
 
+function OverallRank({ rank }: { rank?: number }) {
+  return rank ? <div className="small-label">#{rank} overall</div> : null;
+}
+
 function ReadItem({
   book,
-  index,
+  rank,
+  overall,
+  categories,
+  onSetCategories,
   review,
   dirty,
   saving,
@@ -530,7 +626,10 @@ function ReadItem({
   onRemove,
 }: {
   book: Book;
-  index: number;
+  rank: number;
+  overall?: number;
+  categories: Category[];
+  onSetCategories: (ids: number[]) => void;
   review: string;
   dirty: boolean;
   saving: boolean;
@@ -561,7 +660,7 @@ function ReadItem({
       >
         <IconGrip size={18} />
       </button>
-      <span className="rank">#{index + 1}</span>
+      <span className="rank">#{rank}</span>
       <Cover url={book.cover_url} />
       <div className="info">
         <div className="title">
@@ -572,6 +671,8 @@ function ReadItem({
           {book.isReading ? <span className="badge accent">Reading</span> : null}
         </div>
         <Byline author={book.author} year={book.first_publish_year} />
+        <OverallRank rank={overall} />
+        <CategoryTags categories={categories} ids={book.category_ids} onChange={onSetCategories} />
         <button
           type="button"
           className={`review-toggle${reviewOpen ? " open" : ""}`}
