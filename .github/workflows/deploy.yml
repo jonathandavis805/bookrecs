@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# A newer push to a PR supersedes its running check. Deploys on main are never
+# cancelled mid-way (migrations), only queued.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -28,6 +34,10 @@ jobs:
       - name: Install dependencies (web)
         run: bun install
         working-directory: web
+
+      # Lint, format, typecheck and dead-code checks; ~3s, so it shares this job instead of a separate runner.
+      - name: Check
+        run: bun run check
 
       - name: Build frontend
         run: bun run build

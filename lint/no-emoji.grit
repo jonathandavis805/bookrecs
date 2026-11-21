@@ -1,0 +1,13 @@
+language js
+
+// AGENTS.md: no emoji in the UI; use an SVG icon from web/src/components/ui/icons.tsx.
+// Covers emoji plus glyphs that tend to stand in for icons: arrows, geometric
+// shapes, dingbats (check marks, crosses), braille (drag handles) and the multiplication sign.
+or {
+  JsxText() as $text,
+  JsStringLiteralExpression() as $text,
+  JsTemplateChunkElement() as $text
+} where {
+  $text <: r"(?s).*[\p{Extended_Pictographic}\x{2190}-\x{21FF}\x{25A0}-\x{25FF}\x{2700}-\x{27BF}\x{2800}-\x{28FF}\x{00D7}].*",
+  register_diagnostic(span=$text, message="No emoji or glyph icons in the UI. Use an SVG icon from web/src/components/ui/icons.tsx.")
+}

@@ -1,0 +1,5 @@
+language js
+
+`style={$value}` as $attr where {
+  register_diagnostic(span=$attr, message="Inline styles are not allowed. Add a class to web/src/index.css.")
+}
