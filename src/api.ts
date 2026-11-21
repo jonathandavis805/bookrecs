@@ -1,9 +1,9 @@
 import * as auth from "./auth";
 import * as core from "./core";
+import { execute, now, queryOne } from "./db";
+import { isLatin, searchBooks } from "./ol";
 import * as ratelimit from "./ratelimit";
 import * as twofa from "./twofa";
-import { searchBooks, isLatin } from "./ol";
-import { execute, queryOne, now } from "./db";
 
 const SESSION_COOKIE = "session";
 const SESSION_TTL = 60 * 60 * 24 * 30;
@@ -53,7 +53,7 @@ async function sessionUser(db: D1Database, req: Request): Promise<core.User | nu
 
 async function bearerUser(db: D1Database, req: Request): Promise<core.User | null> {
   const h = req.headers.get("authorization");
-  if (!h || !h.toLowerCase().startsWith("bearer ")) return null;
+  if (!h?.toLowerCase().startsWith("bearer ")) return null;
   const token = h.slice(7).trim();
   const row = await queryOne<{ id: number }>(db, "SELECT id FROM users WHERE api_token = ?", token);
   return row ? await core.getUserById(db, row.id) : null;
@@ -81,8 +81,15 @@ function validPassword(p: unknown): p is string {
   return typeof p === "string" && p.length >= 8;
 }
 
-async function handleSignup(db: D1Database, username: unknown, email: unknown, password: unknown, req: Request): Promise<Response> {
-  if (!validUsername(username)) return json({ error: "Username must be 3-32 chars (letters, numbers, underscore)" }, 400);
+async function handleSignup(
+  db: D1Database,
+  username: unknown,
+  email: unknown,
+  password: unknown,
+  req: Request,
+): Promise<Response> {
+  if (!validUsername(username))
+    return json({ error: "Username must be 3-32 chars (letters, numbers, underscore)" }, 400);
   if (!validEmail(email)) return json({ error: "Enter a valid email address" }, 400);
   if (!validPassword(password)) return json({ error: "Password must be at least 8 characters" }, 400);
   if (await core.usernameExists(db, username)) return json({ error: "That username is taken" }, 409);
@@ -90,7 +97,7 @@ async function handleSignup(db: D1Database, username: unknown, email: unknown, p
 
   const hash = await auth.hashPassword(password);
   const user = await core.createUser(db, username, email, hash);
-  
+
   // Notify admins of new user signup (with user ID for approve/reject)
   const admins = await core.getAdminUsers(db);
   for (const admin of admins) {
@@ -99,20 +106,29 @@ async function handleSignup(db: D1Database, username: unknown, email: unknown, p
       admin.id,
       "new_user_signup",
       `New user signed up: ${user.username} (${user.email})`,
-      { id: user.id, username: user.username, email: user.email }
+      { id: user.id, username: user.username, email: user.email },
     );
   }
-  
+
   const token = await auth.createSession(db, user.id);
-  return json({ 
-    user: { 
-      ...user,
-      bookLimit: user.book_limit === 0 ? null : user.book_limit
-    } 
-  }, 200, { "set-cookie": setSessionCookie(token, req) });
+  return json(
+    {
+      user: {
+        ...user,
+        bookLimit: user.book_limit === 0 ? null : user.book_limit,
+      },
+    },
+    200,
+    { "set-cookie": setSessionCookie(token, req) },
+  );
 }
 
-async function handleLogin(db: D1Database, usernameOrEmail: unknown, password: unknown, req: Request): Promise<Response> {
+async function handleLogin(
+  db: D1Database,
+  usernameOrEmail: unknown,
+  password: unknown,
+  req: Request,
+): Promise<Response> {
   if (typeof usernameOrEmail !== "string" || !usernameOrEmail.trim() || typeof password !== "string" || !password) {
     return json({ error: "Username/email and password are required" }, 400);
   }
@@ -138,7 +154,13 @@ async function handleLogin(db: D1Database, usernameOrEmail: unknown, password: u
 
   if (await twofa.has2FAEnabled(db, u.id)) {
     const pendingToken = auth.randomToken(24);
-    await execute(db, "INSERT INTO pending_logins (token, user_id, expires_at) VALUES (?, ?, ?)", pendingToken, u.id, now() + 300);
+    await execute(
+      db,
+      "INSERT INTO pending_logins (token, user_id, expires_at) VALUES (?, ?, ?)",
+      pendingToken,
+      u.id,
+      now() + 300,
+    );
     return json({ requires2FA: true, pendingToken });
   }
 
@@ -172,12 +194,12 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (path === "/api/me" && method === "GET") {
     const user = (await sessionUser(db, req)) ?? (await bearerUser(db, req));
     if (user) {
-      return json({ 
-        user: { 
+      return json({
+        user: {
           ...user,
           bookLimit: user.book_limit === 0 ? null : user.book_limit, // null = unlimited
-          discoverable: Boolean(user.discoverable)
-        } 
+          discoverable: Boolean(user.discoverable),
+        },
       });
     }
     return json({ user: null });
@@ -252,7 +274,7 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const pending = await queryOne<{ user_id: number; expires_at: number }>(
       db,
       "SELECT user_id, expires_at FROM pending_logins WHERE token = ?",
-      pendingToken
+      pendingToken,
     );
 
     if (!pending || pending.expires_at < now()) {
@@ -294,7 +316,11 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     // Manual books have synthetic keys, so also dedupe Open Library hits by
     // normalized title to avoid showing the same book twice.
     const normTitle = (t: string) =>
-      t.toLowerCase().replace(/^(the|a|an)\s+/, "").replace(/\s+/g, " ").trim();
+      t
+        .toLowerCase()
+        .replace(/^(the|a|an)\s+/, "")
+        .replace(/\s+/g, " ")
+        .trim();
     const mineTitles = new Set(mine.map((m) => normTitle(m.title)));
     const mineResults = mine.map((m) => ({
       key: m.key,
@@ -308,7 +334,7 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     }));
     try {
       const results = await searchBooks(q);
-      const keys = results.map(r => r.key);
+      const keys = results.map((r) => r.key);
       const existingKeys = await core.getExistingBookKeys(db, keys);
       // Books already in the system surface near the top (with the "added"
       // flag), but that boost must never override language preference: for a
@@ -360,17 +386,20 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
 
   if (path === "/api/books/manual" && method === "POST") {
     const { title, author, year, coverUrl, review, rank, public: isPublic } = await readBody(req);
-    
+
     // Check if user has reached the book limit
     if (!(await core.canAddMoreBooks(db, user.id))) {
       const limit = await core.getUserBookLimit(db, user.id);
       return json({ error: `You have reached the maximum of ${limit} books` }, 400);
     }
-    
+
     const r = await core.addManualBook(
-      db, user.id,
+      db,
+      user.id,
       { title, author, year: year != null && year !== "" ? Number(year) : undefined, coverUrl },
-      review, rank, isPublic
+      review,
+      rank,
+      isPublic,
     );
     if (r.error) return json({ error: r.error }, 400);
     return json({ book: r.book, books: await core.listReads(db, user.id) });
@@ -378,13 +407,13 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
 
   if (path === "/api/books" && method === "POST") {
     const { ol_key, review, rank, year, public: isPublic } = await readBody(req);
-    
+
     // Check if user has reached the book limit
     if (!(await core.canAddMoreBooks(db, user.id))) {
       const limit = await core.getUserBookLimit(db, user.id);
       return json({ error: `You have reached the maximum of ${limit} books` }, 400);
     }
-    
+
     const r = await core.addRead(db, user.id, ol_key, review, rank, year, isPublic);
     if (r.error) return json({ error: r.error }, 400);
     return json({ book: r.book, books: await core.listReads(db, user.id) });
@@ -393,8 +422,8 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (path === "/api/me/books" && method === "GET") {
     const books = await core.listReads(db, user.id);
     const reading = await core.listReading(db, user.id);
-    const readingSet = new Set(reading.map(b => b.book_id));
-    const booksWithReadingStatus = books.map(b => ({ ...b, isReading: readingSet.has(b.book_id) }));
+    const readingSet = new Set(reading.map((b) => b.book_id));
+    const booksWithReadingStatus = books.map((b) => ({ ...b, isReading: readingSet.has(b.book_id) }));
     const bookCount = await core.getUserReadCount(db, user.id);
     const bookLimit = await core.getUserBookLimit(db, user.id);
     return json({ books: booksWithReadingStatus, bookCount, maxBooks: bookLimit });
@@ -454,9 +483,12 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (path === "/api/me/wishlist/manual" && method === "POST") {
     const { title, author, year, coverUrl, owned, public: isPublic, rank } = await readBody(req);
     const r = await core.addManualToWishlist(
-      db, user.id,
+      db,
+      user.id,
       { title, author, year: year != null && year !== "" ? Number(year) : undefined, coverUrl },
-      !!owned, !!isPublic, rank
+      !!owned,
+      !!isPublic,
+      rank,
     );
     if (r.error) return json({ error: r.error }, 400);
     return json({ book: r.book, books: await core.listWishlist(db, user.id) });
@@ -478,7 +510,11 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const { review, rank } = await readBody(req);
     const r = await core.moveToRead(db, user.id, Number(wishMove[1]), review, rank);
     if (r.error) return json({ error: r.error }, 400);
-    return json({ ok: true, books: await core.listWishlist(db, user.id), readBooks: await core.listReads(db, user.id) });
+    return json({
+      ok: true,
+      books: await core.listWishlist(db, user.id),
+      readBooks: await core.listReads(db, user.id),
+    });
   }
   const wishOwned = path.match(/^\/api\/me\/wishlist\/(\d+)\/owned$/);
   if (wishOwned && method === "POST") {
@@ -512,12 +548,17 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const { book_id } = await readBody(req);
     const r = await core.moveFromWishlistToReading(db, user.id, Number(book_id));
     if (r.error) return json({ error: r.error }, 400);
-    return json({ book: r.book, books: await core.listReading(db, user.id), wishBooks: await core.listWishlist(db, user.id) });
+    return json({
+      book: r.book,
+      books: await core.listReading(db, user.id),
+      wishBooks: await core.listWishlist(db, user.id),
+    });
   }
   if (path === "/api/me/reading/manual" && method === "POST") {
     const { title, author, year, coverUrl } = await readBody(req);
     const r = await core.addManualToReading(db, user.id, {
-      title, author,
+      title,
+      author,
       year: year != null && year !== "" ? Number(year) : undefined,
       coverUrl,
     });
@@ -535,7 +576,11 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (readingBack && method === "POST") {
     const r = await core.backToWishlist(db, user.id, Number(readingBack[1]));
     if (r.error) return json({ error: r.error }, 400);
-    return json({ ok: true, wishBooks: await core.listWishlist(db, user.id), books: await core.listReading(db, user.id) });
+    return json({
+      ok: true,
+      wishBooks: await core.listWishlist(db, user.id),
+      books: await core.listReading(db, user.id),
+    });
   }
   const readingMatch = path.match(/^\/api\/me\/reading\/(\d+)$/);
   if (readingMatch && method === "DELETE") {
@@ -573,9 +618,10 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   const requestAction = path.match(/^\/api\/friends\/requests\/(\d+)\/(accept|decline)$/);
   if (requestAction && method === "POST") {
     const id = Number(requestAction[1]);
-    const r = requestAction[2] === "accept"
-      ? await core.acceptFriendRequest(db, user.id, id)
-      : await core.declineFriendRequest(db, user.id, id);
+    const r =
+      requestAction[2] === "accept"
+        ? await core.acceptFriendRequest(db, user.id, id)
+        : await core.declineFriendRequest(db, user.id, id);
     if (r.error) return json({ error: r.error }, 404);
     return json(r);
   }
@@ -600,28 +646,28 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   // ----- change password -----
   if (path === "/api/change-password" && method === "POST") {
     const { currentPassword, newPassword } = await readBody(req);
-    
+
     if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
       return json({ error: "Current and new password are required" }, 400);
     }
-    
+
     if (!validPassword(newPassword)) {
       return json({ error: "New password must be at least 8 characters" }, 400);
     }
-    
+
     // Verify current password
     const u = await core.findUser(db, user.email);
     if (!u) return json({ error: "User not found" }, 404);
-    
+
     const valid = await auth.verifyPassword(currentPassword, u.password_hash);
     if (!valid) {
       return json({ error: "Current password is incorrect" }, 401);
     }
-    
+
     // Hash and update to new password
     const newHash = await auth.hashPassword(newPassword);
     await execute(db, "UPDATE users SET password_hash = ? WHERE id = ?", newHash, user.id);
-    
+
     return json({ ok: true });
   }
 
@@ -635,8 +681,11 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (path === "/api/clubs" && method === "POST") {
     const { name, description, usernames } = await readBody(req);
     const r = await core.createClub(
-      db, user.id, name, description,
-      Array.isArray(usernames) ? usernames.map(String) : []
+      db,
+      user.id,
+      name,
+      description,
+      Array.isArray(usernames) ? usernames.map(String) : [],
     );
     if (r.error) return json({ error: r.error }, 400);
     return json({ club: r.club, invited: r.invited ?? [], skipped: r.skipped ?? [] });
@@ -697,7 +746,10 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (clubCloseVote && method === "POST") {
     const r = await core.closeVote(db, user.id, Number(clubCloseVote[1]));
     if (r.error) {
-      return json({ error: r.error, ...(r.runoffNeeded ? { runoffNeeded: true, runoffTitles: r.runoffTitles ?? [] } : {}) }, 400);
+      return json(
+        { error: r.error, ...(r.runoffNeeded ? { runoffNeeded: true, runoffTitles: r.runoffTitles ?? [] } : {}) },
+        400,
+      );
     }
     return json(r);
   }
@@ -735,7 +787,12 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   }
   const clubRemoveNomination = path.match(/^\/api\/clubs\/(\d+)\/nominations\/(\d+)$/);
   if (clubRemoveNomination && method === "DELETE") {
-    const r = await core.removeNomination(db, user.id, Number(clubRemoveNomination[1]), Number(clubRemoveNomination[2]));
+    const r = await core.removeNomination(
+      db,
+      user.id,
+      Number(clubRemoveNomination[1]),
+      Number(clubRemoveNomination[2]),
+    );
     if (r.error) return json({ error: r.error }, 400);
     const detail = await core.getClub(db, user.id, Number(clubRemoveNomination[1]));
     return json(detail.error ? { ok: true } : { club: detail.club });
@@ -785,7 +842,11 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
           if (!alive) return;
           alive = false;
           if (timer) clearInterval(timer);
-          try { controller.close(); } catch { /* already closed */ }
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
         };
 
         const tick = async () => {
@@ -874,17 +935,17 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
     const targetUserId = Number(approveUserMatch[1]);
     await core.approveUser(db, targetUserId);
-    
+
     // Dismiss the related notification
     const notification = await queryOne<{ id: number }>(
       db,
       "SELECT id FROM notifications WHERE type = 'new_user_signup' AND data LIKE ? LIMIT 1",
-      `%"id":${targetUserId},%`
+      `%"id":${targetUserId},%`,
     );
     if (notification) {
       await core.dismissNotification(db, user.id, notification.id);
     }
-    
+
     return json({ ok: true });
   }
 
@@ -893,17 +954,17 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     if (!user.is_admin) return json({ error: "Unauthorized" }, 403);
     const targetUserId = Number(rejectUserMatch[1]);
     await core.rejectUser(db, targetUserId);
-    
+
     // Dismiss the related notification
     const notification = await queryOne<{ id: number }>(
       db,
       "SELECT id FROM notifications WHERE type = 'new_user_signup' AND data LIKE ? LIMIT 1",
-      `%"id":${targetUserId},%`
+      `%"id":${targetUserId},%`,
     );
     if (notification) {
       await core.dismissNotification(db, user.id, notification.id);
     }
-    
+
     return json({ ok: true });
   }
 

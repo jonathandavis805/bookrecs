@@ -15,12 +15,12 @@ interface Tool {
 
 const err = (m: string) => `Error: ${m}`;
 const requireUser = (): core.User | string => {
-  if (!actingUser) return err("BOOKRECS_USER is not set, or does not match a user. Launch with: BOOKRECS_USER=alice bun run mcp");
+  if (!actingUser)
+    return err("BOOKRECS_USER is not set, or does not match a user. Launch with: BOOKRECS_USER=alice bun run mcp");
   const u = core.getUserById(actingUser.id);
   if (!u) return err(`Acting user not found: ${ACTING}`);
   return u;
 };
-const uid = (): number => actingUser!.id;
 
 const tools: Tool[] = [
   {
@@ -103,7 +103,7 @@ const tools: Tool[] = [
         { title: args.title, author: args.author, year: args.year, coverUrl: args.cover_url },
         args.review,
         args.rank,
-        args.public
+        args.public,
       );
       if (r.error) return err(r.error);
       return JSON.stringify({ ok: true, book: r.book, list: core.listReads(u.id) }, null, 2);
@@ -183,9 +183,7 @@ const tools: Tool[] = [
       const u = requireUser();
       if (typeof u === "string") return u;
       const keys: string[] = Array.isArray(args.ordered_ol_keys) ? args.ordered_ol_keys.map(String) : [];
-      const ids = keys
-        .map((k) => core.getBookByOlKey(k)?.id)
-        .filter((x): x is number => typeof x === "number");
+      const ids = keys.map((k) => core.getBookByOlKey(k)?.id).filter((x): x is number => typeof x === "number");
       core.reorderReads(u.id, ids);
       return JSON.stringify({ ok: true, list: core.listReads(u.id) }, null, 2);
     },
@@ -206,7 +204,8 @@ const tools: Tool[] = [
   },
   {
     name: "send_friend_request",
-    description: "Send a friend request by username or email. Accepts a real friend request from the other side automatically.",
+    description:
+      "Send a friend request by username or email. Accepts a real friend request from the other side automatically.",
     inputSchema: {
       type: "object",
       properties: { username_or_email: { type: "string" } },
@@ -320,7 +319,14 @@ const tools: Tool[] = [
       if (args.book_id != null) {
         r = core.addToWishlistByBookId(u.id, Number(args.book_id), !!args.owned, !!args.public, args.rank);
       } else if (args.ol_key != null) {
-        r = await core.addToWishlistByOlKey(u.id, String(args.ol_key), !!args.owned, args.year, !!args.public, args.rank);
+        r = await core.addToWishlistByOlKey(
+          u.id,
+          String(args.ol_key),
+          !!args.owned,
+          args.year,
+          !!args.public,
+          args.rank,
+        );
       } else {
         return err("Provide ol_key or book_id");
       }
@@ -352,7 +358,7 @@ const tools: Tool[] = [
         { title: args.title, author: args.author, year: args.year, coverUrl: args.cover_url },
         !!args.owned,
         !!args.public,
-        args.rank
+        args.rank,
       );
       if (r.error) return err(r.error);
       return JSON.stringify({ ok: true, book: r.book, list: core.listWishlist(u.id) }, null, 2);
@@ -447,8 +453,7 @@ const tools: Tool[] = [
   },
   {
     name: "set_public",
-    description:
-      "Set whether a single book is public (visible to friends) or private. 'list' is 'read' or 'wish'.",
+    description: "Set whether a single book is public (visible to friends) or private. 'list' is 'read' or 'wish'.",
     inputSchema: {
       type: "object",
       properties: {
@@ -461,9 +466,10 @@ const tools: Tool[] = [
     handler: (args) => {
       const u = requireUser();
       if (typeof u === "string") return u;
-      const r = args.list === "wish"
-        ? core.setWishPublic(u.id, Number(args.book_id), !!args.public)
-        : core.setReadPublic(u.id, Number(args.book_id), !!args.public);
+      const r =
+        args.list === "wish"
+          ? core.setWishPublic(u.id, Number(args.book_id), !!args.public)
+          : core.setReadPublic(u.id, Number(args.book_id), !!args.public);
       if (r.error) return err(r.error);
       return JSON.stringify({ ok: true }, null, 2);
     },
@@ -496,8 +502,7 @@ const tools: Tool[] = [
   },
   {
     name: "add_to_reading",
-    description:
-      "Mark a book as currently reading, by ol_key or book_id (removes it from the read/wishlist lists).",
+    description: "Mark a book as currently reading, by ol_key or book_id (removes it from the read/wishlist lists).",
     inputSchema: {
       type: "object",
       properties: {
@@ -613,7 +618,7 @@ const tools: Tool[] = [
 const SERVER_INFO = { name: "bookrecs", version: "1.0.0" };
 
 function write(obj: unknown): void {
-  process.stdout.write(JSON.stringify(obj) + "\n");
+  process.stdout.write(`${JSON.stringify(obj)}\n`);
 }
 
 async function dispatch(msg: any): Promise<void> {
@@ -678,9 +683,7 @@ async function dispatch(msg: any): Promise<void> {
 
 const rl = createInterface({ input: process.stdin, terminal: false, crlfDelay: Infinity });
 
-process.stderr.write(
-  `bookrecs MCP server started. Acting as: ${ACTING || "(unset — set BOOKRECS_USER)"}\n`
-);
+process.stderr.write(`bookrecs MCP server started. Acting as: ${ACTING || "(unset — set BOOKRECS_USER)"}\n`);
 
 for await (const line of rl) {
   const trimmed = line.trim();

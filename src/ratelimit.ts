@@ -1,4 +1,4 @@
-import { queryOne, queryAll, execute, now } from "./db";
+import { execute, now, queryAll } from "./db";
 
 const RATE_LIMIT_WINDOW = 15 * 60; // 15 minutes in seconds
 const MAX_ATTEMPTS = 5;
@@ -14,7 +14,9 @@ export async function isBlocked(db: D1Database, ip: string, identifier: string):
   const rows = await queryAll<{ cnt: number }>(
     db,
     "SELECT COUNT(*) as cnt FROM rate_limits WHERE ip = ? AND identifier = ? AND timestamp >= ?",
-    ip, identifier, cutoff
+    ip,
+    identifier,
+    cutoff,
   );
   return (rows[0]?.cnt ?? 0) >= MAX_ATTEMPTS;
 }

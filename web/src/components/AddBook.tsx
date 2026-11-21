@@ -1,5 +1,8 @@
-import { useState, useEffect } from "react";
-import { api, SearchHit } from "../api";
+import { useEffect, useState } from "react";
+import { api, errorMessage, type SearchHit } from "../api";
+import { Byline, Cover } from "./ui/Book";
+import { IconBook, IconCheck, IconHeart } from "./ui/icons";
+import { Switch } from "./ui/Switch";
 
 export default function AddBook() {
   const [bookCount, setBookCount] = useState(0);
@@ -19,18 +22,16 @@ export default function AddBook() {
     <div className="page">
       <div className="page-head">
         <h2>Add a Book</h2>
+        <p className="muted">Search the Open Library — or add a book by hand if it's missing.</p>
         <p className="muted">
-          Search the Open Library — or add a book by hand if it's missing.
-        </p>
-        <p className="book-limit-info">
           {bookLimit === null
             ? "You have unlimited book slots."
             : atLimit
-            ? `You've reached the maximum of ${bookLimit} books.`
-            : `${remaining} of ${bookLimit} book slots remaining.`}
+              ? `You've reached the maximum of ${bookLimit} books.`
+              : `${remaining} of ${bookLimit} book slots remaining.`}
         </p>
       </div>
-      <SearchPane atLimit={atLimit} bookLimit={bookLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
+      <SearchPane atLimit={atLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
       <ManualPane atLimit={atLimit} bookLimit={bookLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
     </div>
   );
@@ -42,7 +43,7 @@ interface PaneProps {
   onBookAdded: () => void;
 }
 
-function SearchPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
+function SearchPane({ atLimit, onBookAdded }: Omit<PaneProps, "bookLimit">) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
@@ -61,13 +62,11 @@ function SearchPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
       setSearching(true);
       setError("");
       try {
-        const d = await api<{ results: SearchHit[] }>(
-          "/api/books/search?q=" + encodeURIComponent(q.trim())
-        );
+        const d = await api<{ results: SearchHit[] }>(`/api/books/search?q=${encodeURIComponent(q.trim())}`);
         setHits(d.results);
         setSearched(true);
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err) {
+        setError(errorMessage(err));
       } finally {
         setSearching(false);
       }
@@ -78,7 +77,7 @@ function SearchPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
 
   async function add(hit: SearchHit, target: "read" | "reading" | "wish") {
     if (target === "read" && atLimit) return;
-    
+
     const key = `${hit.key}:${target}`;
     setStatus((s) => ({ ...s, [key]: "Adding…" }));
     try {
@@ -87,35 +86,30 @@ function SearchPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
           method: "POST",
           body: JSON.stringify({ ol_key: hit.key, year: hit.year }),
         });
-        setStatus((s) => ({ ...s, [key]: "Added ✓" }));
+        setStatus((s) => ({ ...s, [key]: "Added" }));
         onBookAdded();
       } else if (target === "reading") {
         await api("/api/me/reading", {
           method: "POST",
           body: JSON.stringify({ ol_key: hit.key, year: hit.year }),
         });
-        setStatus((s) => ({ ...s, [key]: "Reading ✓" }));
+        setStatus((s) => ({ ...s, [key]: "Reading" }));
       } else {
         await api("/api/me/wishlist", {
           method: "POST",
           body: JSON.stringify({ ol_key: hit.key, year: hit.year }),
         });
-        setStatus((s) => ({ ...s, [key]: "Saved ✓" }));
+        setStatus((s) => ({ ...s, [key]: "Saved" }));
       }
-    } catch (err: any) {
-      setStatus((s) => ({ ...s, [key]: err.message }));
+    } catch (err) {
+      setStatus((s) => ({ ...s, [key]: errorMessage(err) }));
     }
   }
 
   return (
     <section className="add-section">
       <div className="search-bar">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Title or author…"
-          autoFocus
-        />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Title or author…" autoFocus />
         {searching && <span className="searching-indicator">Searching…</span>}
       </div>
 
@@ -126,31 +120,28 @@ function SearchPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
           const readS = status[`${h.key}:read`];
           const read2 = status[`${h.key}:reading`];
           const wishS = status[`${h.key}:wish`];
-          const canAddRead = !atLimit && readS !== "Added ✓";
           return (
             <li key={h.key} className="book-row">
-              {h.coverUrl ? (
-                <img className="cover" src={h.coverUrl} alt="" />
-              ) : (
-                <span className="cover no-cover">📚</span>
-              )}
+              <Cover url={h.coverUrl} />
               <div className="info">
                 <div className="title">
                   {h.title}
-                  {h.added && <span className="added-badge" title="Added by someone">✓</span>}
+                  {h.added && (
+                    <span className="added-mark" title="Added by someone">
+                      <IconCheck size={14} />
+                    </span>
+                  )}
                 </div>
-                <div className="author">
-                  {h.author || "Unknown author"}
-                  {h.year ? ` · ${h.year}` : ""}
-                </div>
+                <Byline author={h.author} year={h.year} />
               </div>
               <div className="actions">
-                {readS === "Added ✓" ? (
-                  <span className="added">Added ✓</span>
+                {readS === "Added" ? (
+                  <span className="success-text">Added</span>
                 ) : readS && readS !== "Adding…" ? (
-                  <span className="added error-text">{readS}</span>
+                  <span className="error-text">{readS}</span>
                 ) : (
                   <button
+                    type="button"
                     onClick={() => add(h, "read")}
                     disabled={readS === "Adding…" || atLimit}
                     title={atLimit ? "Book limit reached" : ""}
@@ -158,30 +149,34 @@ function SearchPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
                     {readS === "Adding…" ? "…" : atLimit ? "Limit reached" : "My Books"}
                   </button>
                 )}
-                {read2 === "Reading ✓" ? (
-                  <span className="added">Reading ✓</span>
+                {read2 === "Reading" ? (
+                  <span className="success-text">Reading</span>
                 ) : read2 && read2 !== "Adding…" ? (
-                  <span className="added error-text">{read2}</span>
+                  <span className="error-text">{read2}</span>
                 ) : (
-                  <button
-                    className="secondary"
-                    onClick={() => add(h, "reading")}
-                    disabled={read2 === "Adding…"}
-                  >
-                    {read2 === "Adding…" ? "…" : "📖 Reading"}
+                  <button type="button" onClick={() => add(h, "reading")} disabled={read2 === "Adding…"}>
+                    {read2 === "Adding…" ? (
+                      "…"
+                    ) : (
+                      <>
+                        <IconBook /> Reading
+                      </>
+                    )}
                   </button>
                 )}
-                {wishS === "Saved ✓" ? (
-                  <span className="added">Saved ✓</span>
+                {wishS === "Saved" ? (
+                  <span className="success-text">Saved</span>
                 ) : wishS && wishS !== "Adding…" ? (
-                  <span className="added error-text">{wishS}</span>
+                  <span className="error-text">{wishS}</span>
                 ) : (
-                  <button
-                    className="secondary"
-                    onClick={() => add(h, "wish")}
-                    disabled={wishS === "Adding…"}
-                  >
-                    {wishS === "Adding…" ? "…" : "♡ Wishlist"}
+                  <button type="button" onClick={() => add(h, "wish")} disabled={wishS === "Adding…"}>
+                    {wishS === "Adding…" ? (
+                      "…"
+                    ) : (
+                      <>
+                        <IconHeart /> Wishlist
+                      </>
+                    )}
                   </button>
                 )}
               </div>
@@ -193,7 +188,7 @@ function SearchPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
       {searched && hits.length === 0 && !error && (
         <div className="empty">
           <p>No matches for "{q}".</p>
-          <p className="muted">Add it by hand using the form below. 👇</p>
+          <p className="muted">Add it by hand using the form below.</p>
         </div>
       )}
     </section>
@@ -214,7 +209,7 @@ function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (target === "read" && atLimit) return;
-    
+
     setError("");
     setBusy(true);
     setDone("");
@@ -222,33 +217,33 @@ function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
       const body = JSON.stringify({ title, author, year, coverUrl, public: isPublic });
       if (target === "read") {
         await api("/api/books/manual", { method: "POST", body });
-        setDone('Added ✓ — find it in your "My Books" list.');
+        setDone('Added — find it in your "My Books" list.');
         onBookAdded();
       } else if (target === "reading") {
         await api("/api/me/reading/manual", {
           method: "POST",
           body: JSON.stringify({ title, author, year, coverUrl }),
         });
-        setDone('Now reading ✓ — find it in "Currently reading".');
+        setDone('Now reading — find it in "Currently reading".');
       } else {
         await api("/api/me/wishlist/manual", { method: "POST", body });
-        setDone('Saved ✓ — find it in your "Wishlist".');
+        setDone('Saved — find it in your "Wishlist".');
       }
       setTitle("");
       setAuthor("");
       setYear("");
       setCoverUrl("");
       setIsPublic(target === "read");
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section className="manual-section">
-      <h3>Can't find your book? Add it manually</h3>
+    <section className="form-section">
+      <h3 className="section-title">Can't find your book? Add it manually</h3>
 
       <div className="segmented">
         <button
@@ -261,11 +256,7 @@ function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
         >
           My Books
         </button>
-        <button
-          type="button"
-          className={target === "reading" ? "active" : ""}
-          onClick={() => setTarget("reading")}
-        >
+        <button type="button" className={target === "reading" ? "active" : ""} onClick={() => setTarget("reading")}>
           Reading
         </button>
         <button
@@ -280,76 +271,50 @@ function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
         </button>
       </div>
 
-      {done && <div className="info">{done}</div>}
+      {done && <div className="success">{done}</div>}
       {error && <div className="error">{error}</div>}
       {atLimit && target === "read" && bookLimit !== null && (
         <div className="error">You've reached the maximum of {bookLimit} books. Remove a book to add another.</div>
       )}
 
-      <form className="manual-form" onSubmit={submit}>
-        <label>
+      <form className="card form" onSubmit={submit}>
+        <label className="field">
           Title
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Book title"
-            required
-          />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Book title" required />
         </label>
-        <label>
+        <label className="field">
           Author
-          <input
-            value={author}
-            onChange={(e) => setAuthor(e.target.value)}
-            placeholder="Author"
-          />
+          <input value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Author" />
         </label>
         <div className="row-fields">
-          <label>
+          <label className="field">
             Year
-            <input
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-              placeholder="e.g. 1987"
-              inputMode="numeric"
-            />
+            <input value={year} onChange={(e) => setYear(e.target.value)} placeholder="e.g. 1987" inputMode="numeric" />
           </label>
-          <label className="grow">
+          <label className="field grow">
             Cover URL (optional)
-            <input
-              value={coverUrl}
-              onChange={(e) => setCoverUrl(e.target.value)}
-              placeholder="https://…/cover.jpg"
-            />
+            <input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} placeholder="https://…/cover.jpg" />
           </label>
         </div>
         {target === "reading" ? (
           <div className="muted">Currently reading is always visible to friends.</div>
         ) : (
-          <div className="owned-row">
+          <div className="toggle-row">
             <span className="muted">Public</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={isPublic}
-              className={"switch sm" + (isPublic ? " on" : "")}
-              onClick={() => setIsPublic((p) => !p)}
-            >
-              <span className="knob" />
-            </button>
+            <Switch checked={isPublic} onChange={setIsPublic} label="Public" />
             <span className="muted">{isPublic ? "Friends can see it" : "Private"}</span>
           </div>
         )}
-        <button type="submit" disabled={busy || (atLimit && target === "read")}>
+        <button type="submit" className="btn-primary" disabled={busy || (atLimit && target === "read")}>
           {busy
             ? "Adding…"
             : atLimit && target === "read"
-            ? "Book limit reached"
-            : target === "read"
-            ? "Add to My Books"
-            : target === "reading"
-            ? "Start reading"
-            : "Add to Wishlist"}
+              ? "Book limit reached"
+              : target === "read"
+                ? "Add to My Books"
+                : target === "reading"
+                  ? "Start reading"
+                  : "Add to Wishlist"}
         </button>
       </form>
     </section>

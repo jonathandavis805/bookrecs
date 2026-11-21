@@ -1,8 +1,7 @@
 const BASE = "https://openlibrary.org";
 const USER_AGENT = "bookrecs/1.0 (personal book tracking app)";
 
-const coverUrl = (id: number, size: "M" | "L" = "M") =>
-  `https://covers.openlibrary.org/b/id/${id}-${size}.jpg`;
+const coverUrl = (id: number, size: "M" | "L" = "M") => `https://covers.openlibrary.org/b/id/${id}-${size}.jpg`;
 
 export interface OLWork {
   key: string;
@@ -44,7 +43,10 @@ export function isLatin(s: string): boolean {
 
 // "Surname, Given Names" -> "Given Names Surname"
 function reverseName(s: string): string {
-  const parts = s.split(",").map((p) => p.trim()).filter(Boolean);
+  const parts = s
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (parts.length === 2) return `${parts[1]} ${parts[0]}`;
   return s;
 }
@@ -135,7 +137,11 @@ async function englishTitle(key: string): Promise<string> {
       if (!langs.some((l) => typeof l?.key === "string" && l.key.endsWith("/eng"))) continue;
       // "The Brothers Karamazov" / "the brothers karamazov" / "Brothers
       // Karamazov" are all the same title to a reader — count them together.
-      const norm = title.toLowerCase().replace(/^(the|a|an)\s+/, "").replace(/\s+/g, " ").trim();
+      const norm = title
+        .toLowerCase()
+        .replace(/^(the|a|an)\s+/, "")
+        .replace(/\s+/g, " ")
+        .trim();
       if (!norm) continue;
       const cur = counts.get(norm) ?? { title, n: 0 };
       cur.n += 1;
@@ -171,7 +177,7 @@ export async function searchBooks(query: string): Promise<OLHit[]> {
   const hits = docs.map((d) => ({
     key: d.key,
     title: d.title ?? "Unknown title",
-    author: Array.isArray(d.author_name) ? d.author_name[0] : d.author_name ?? "",
+    author: Array.isArray(d.author_name) ? d.author_name[0] : (d.author_name ?? ""),
     coverUrl: d.cover_i ? coverUrl(d.cover_i) : undefined,
     year: d.first_publish_year ?? undefined,
   }));
@@ -197,7 +203,7 @@ export async function searchBooks(query: string): Promise<OLHit[]> {
         docs.forEach((d, i) => {
           if (authorKeyOf(d) === k) hits[i].author = en;
         });
-      })
+      }),
     );
   }
 
@@ -219,7 +225,7 @@ export async function searchBooks(query: string): Promise<OLHit[]> {
 export async function fetchWork(key: string): Promise<OLWork | null> {
   try {
     const d = await getJson(`${BASE}${key}.json`);
-    if (!d || !d.title) return null;
+    if (!d?.title) return null;
 
     // A foreign-script title ("Братья Карамазовы") reads awkwardly next to
     // the English author name we resolve below — display the work's English
@@ -239,7 +245,7 @@ export async function fetchWork(key: string): Promise<OLWork | null> {
       if (n) names.push(n);
     }
     const coverId = (d.covers ?? []).find((c: any) => typeof c === "number" && c > 0);
-    
+
     // Extract synopsis/description
     let synopsis: string | undefined;
     const desc = d.description;
@@ -250,7 +256,7 @@ export async function fetchWork(key: string): Promise<OLWork | null> {
         synopsis = desc.value;
       }
     }
-    
+
     return {
       key,
       title,

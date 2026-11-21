@@ -23,6 +23,7 @@ export interface Book {
   updated_at: number;
   mine?: "read" | "wish" | "reading" | null;
   isReading?: boolean;
+  synopsis?: string | null;
 }
 
 export interface SearchHit {
@@ -70,7 +71,7 @@ export interface ReadingItem {
   mine?: "read" | "wish" | "reading" | null;
 }
 
-export interface ClubPick {
+interface ClubPick {
   id: number;
   book_id: number;
   ol_key: string;
@@ -151,17 +152,17 @@ export interface ClubDetailData {
   pastPicks: ClubPick[];
 }
 
+export function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
-export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+export async function api<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
     headers: { "content-type": "application/json", ...(options.headers || {}) },
     ...options,
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = (data as any)?.error || `Request failed (${res.status})`;
-    throw new Error(msg);
-  }
+  const data: { error?: string } = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data as T;
 }

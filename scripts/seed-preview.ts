@@ -17,7 +17,11 @@ interface Ctx {
   cookie: string;
 }
 
-async function call(path: string, init: RequestInit = {}, cookie?: string): Promise<{ ok: boolean; status: number; data: any; cookie?: string }> {
+async function call(
+  path: string,
+  init: RequestInit = {},
+  cookie?: string,
+): Promise<{ ok: boolean; status: number; data: any; cookie?: string }> {
   const res = await fetch(BASE + path, {
     ...init,
     headers: {
@@ -47,9 +51,7 @@ async function signupOrLogin(username: string): Promise<Ctx> {
       body: JSON.stringify({ usernameOrEmail: username, password: PASSWORD }),
     });
     if (!login.ok || !login.cookie) {
-      throw new Error(
-        `user "${username}" already exists but the seed password "${PASSWORD}" doesn't work — skipping.`
-      );
+      throw new Error(`user "${username}" already exists but the seed password "${PASSWORD}" doesn't work — skipping.`);
     }
     console.log(`  logged in ${username} (existing account)`);
     return { username, cookie: login.cookie };
@@ -59,14 +61,22 @@ async function signupOrLogin(username: string): Promise<Ctx> {
 
 async function befriend(a: Ctx, b: Ctx): Promise<void> {
   // Sending the reverse request auto-accepts, so send both directions.
-  await call("/api/friends/requests", {
-    method: "POST",
-    body: JSON.stringify({ usernameOrEmail: b.username }),
-  }, a.cookie);
-  await call("/api/friends/requests", {
-    method: "POST",
-    body: JSON.stringify({ usernameOrEmail: a.username }),
-  }, b.cookie);
+  await call(
+    "/api/friends/requests",
+    {
+      method: "POST",
+      body: JSON.stringify({ usernameOrEmail: b.username }),
+    },
+    a.cookie,
+  );
+  await call(
+    "/api/friends/requests",
+    {
+      method: "POST",
+      body: JSON.stringify({ usernameOrEmail: a.username }),
+    },
+    b.cookie,
+  );
   console.log(`  ${a.username} <-> ${b.username} are friends`);
 }
 
@@ -83,10 +93,14 @@ async function nominate(ctx: Ctx, clubId: number, q: string): Promise<boolean> {
     console.log(`  ! could not find "${q}" on Open Library (offline?) — nomination skipped`);
     return false;
   }
-  const r = await call(`/api/clubs/${clubId}/nominate`, {
-    method: "POST",
-    body: JSON.stringify({ ol_key: hit.key, year: hit.year }),
-  }, ctx.cookie);
+  const r = await call(
+    `/api/clubs/${clubId}/nominate`,
+    {
+      method: "POST",
+      body: JSON.stringify({ ol_key: hit.key, year: hit.year }),
+    },
+    ctx.cookie,
+  );
   if (r.ok) {
     console.log(`  ${ctx.username} nominated "${hit.title}"`);
     return true;
@@ -95,31 +109,46 @@ async function nominate(ctx: Ctx, clubId: number, q: string): Promise<boolean> {
   return false;
 }
 
-async function createClubIfMissing(owner: Ctx, name: string, invitees: Ctx[], description: string): Promise<number | null> {
+async function createClubIfMissing(
+  owner: Ctx,
+  name: string,
+  invitees: Ctx[],
+  description: string,
+): Promise<number | null> {
   const list = await call("/api/clubs", {}, owner.cookie);
   const existing = list.data.clubs?.find((c: any) => c.name === name);
   if (existing) {
     console.log(`  club "${name}" already exists (#${existing.id}) — skipping`);
     return null;
   }
-  const r = await call("/api/clubs", {
-    method: "POST",
-    body: JSON.stringify({
-      name,
-      description,
-      usernames: invitees.map((c) => c.username),
-    }),
-  }, owner.cookie);
+  const r = await call(
+    "/api/clubs",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        description,
+        usernames: invitees.map((c) => c.username),
+      }),
+    },
+    owner.cookie,
+  );
   if (!r.ok) throw new Error(`createClub("${name}") failed: ${JSON.stringify(r.data)}`);
-  console.log(`  ${owner.username} created club "${name}" (#${r.data.club.id}), invited: ${r.data.invited.join(", ") || "nobody"}`);
+  console.log(
+    `  ${owner.username} created club "${name}" (#${r.data.club.id}), invited: ${r.data.invited.join(", ") || "nobody"}`,
+  );
   return r.data.club.id;
 }
 
 async function acceptInvite(ctx: Ctx, clubId: number): Promise<void> {
-  const r = await call(`/api/clubs/${clubId}/respond`, {
-    method: "POST",
-    body: JSON.stringify({ accept: true }),
-  }, ctx.cookie);
+  const r = await call(
+    `/api/clubs/${clubId}/respond`,
+    {
+      method: "POST",
+      body: JSON.stringify({ accept: true }),
+    },
+    ctx.cookie,
+  );
   if (r.ok) console.log(`  ${ctx.username} joined club #${clubId}`);
   else console.log(`  ! ${ctx.username} couldn't join club #${clubId}: ${r.data.error}`);
 }
@@ -127,17 +156,19 @@ async function acceptInvite(ctx: Ctx, clubId: number): Promise<void> {
 async function vote(ctx: Ctx, clubId: number, bookTitlePattern: string): Promise<void> {
   const d = await call(`/api/clubs/${clubId}`, {}, ctx.cookie);
   if (!d.ok) return;
-  const nom = d.data.club.nominations.find((n: any) =>
-    n.title.toLowerCase().includes(bookTitlePattern.toLowerCase())
-  );
+  const nom = d.data.club.nominations.find((n: any) => n.title.toLowerCase().includes(bookTitlePattern.toLowerCase()));
   if (!nom) {
     console.log(`  ! ${ctx.username} found no nomination matching "${bookTitlePattern}"`);
     return;
   }
-  const r = await call(`/api/clubs/${clubId}/vote`, {
-    method: "POST",
-    body: JSON.stringify({ nominationId: nom.id }),
-  }, ctx.cookie);
+  const r = await call(
+    `/api/clubs/${clubId}/vote`,
+    {
+      method: "POST",
+      body: JSON.stringify({ nominationId: nom.id }),
+    },
+    ctx.cookie,
+  );
   if (r.ok) console.log(`  ${ctx.username} voted for "${nom.title}"`);
   else console.log(`  ! ${ctx.username} vote failed: ${r.data.error}`);
 }
@@ -156,7 +187,7 @@ async function main() {
   const alice = await signupOrLogin("alice");
   const bob = await signupOrLogin("bob");
   const carol = await signupOrLogin("carol");
-  const dave = await signupOrLogin("dave"); // no friends — demonstrates invite gating
+  await signupOrLogin("dave"); // no friends — demonstrates invite gating
 
   // 2. Friendships
   console.log("\nFriendships:");
@@ -170,7 +201,7 @@ async function main() {
     alice,
     "SciFi & Fantasy Book Club",
     [bob, carol],
-    "Spaceships, dragons, and the books between them."
+    "Spaceships, dragons, and the books between them.",
   );
   if (sfId !== null) {
     await acceptInvite(carol, sfId); // bob stays pending on purpose
@@ -184,12 +215,7 @@ async function main() {
 
   // 4. Club 2 — a finished vote with a current read.
   console.log("\nClub 2 (pick already made):");
-  const classicsId = await createClubIfMissing(
-    alice,
-    "Classics Club",
-    [carol],
-    "Old books, new friends."
-  );
+  const classicsId = await createClubIfMissing(alice, "Classics Club", [carol], "Old books, new friends.");
   if (classicsId !== null) {
     await acceptInvite(carol, classicsId);
     const n1 = await nominate(alice, classicsId, "Pride and Prejudice");

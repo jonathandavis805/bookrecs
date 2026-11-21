@@ -2,7 +2,7 @@
 
 A tiny book-tracking app. Create an account, fuzzy-search the
 [Open Library](https://openlibrary.org) to add books you've read (or add one
-by hand if it's missing), rank them in order (1 = your #1 — *not* a 1–5
+by hand if it's missing), rank them in order (1 = your #1 — _not_ a 1–5
 rating), write a short review, and add friends by username or email to browse
 each other's books. One page shows your **currently reading**, **read list**, and
 **wishlist** — the read list and wishlist are ranked in order (1 = top, drag to
@@ -70,6 +70,7 @@ Open http://localhost:8788, sign up, and add a book.
 ## Production
 
 The app deploys automatically via GitHub Actions when you push to `main`:
+
 1. Database migrations run against D1
 2. Frontend builds and deploys to Cloudflare Pages
 3. API runs as a Cloudflare Worker
@@ -116,39 +117,39 @@ BOOKRECS_USER=alice bun run src/mcp.ts
 
 ### MCP tools
 
-| Tool | Purpose |
-|------|---------|
-| `search_books`   | Fuzzy-search Open Library, returns `ol_key`s |
-| `add_book`       | Add a book to your list (optional rank + review) |
-| `add_manual_book`| Add a book that isn't in Open Library, by title/author |
-| `my_books`       | Your ranked list with reviews |
-| `remove_book`    | Remove a book by `ol_key` |
-| `set_review`     | Set/update a review |
-| `set_rank`       | Move one book to a new rank |
-| `reorder_books`  | Reorder the whole list (full ordered array) |
-| `search_users`   | Find users by username or email |
-| `send_friend_request` | Add a friend by username/email |
-| `friend_requests`| List pending incoming + outgoing requests |
-| `accept_friend_request` / `decline_friend_request` | Answer a request |
-| `list_friends`   | Your accepted friends |
-| `friend_books`   | A friend's ranked list + reviews |
-| `my_wishlist`    | Your wishlist (each item: `owned` + `public`) |
-| `add_to_wishlist`| Add to your wishlist by `ol_key` **or** `book_id` (a friend's book), optional `owned`/`public` |
-| `add_to_wishlist_manual` | Add a not-in-Open-Library book to your wishlist |
-| `remove_from_wishlist` | Remove a wishlist item by `book_id` |
-| `reorder_wishlist` | Reorder your wishlist (full ordered `book_id` array) |
-| `set_wish_rank`  | Move one wishlist book to a new rank |
-| `set_owned`      | Mark a wishlist item owned / not owned |
-| `set_public`     | Set a book public/private (`list` = `read` or `wish`) |
-| `friend_wishlist`| A friend's public wishlist items |
-| `move_to_read`   | Move a wishlist item into your read list (optional `review`, `rank`) |
-| `my_reading`     | The books you're currently reading |
-| `add_to_reading` | Mark a book currently reading (by `ol_key` or `book_id`) |
-| `add_to_reading_manual` | Add a not-in-Open-Library book as currently reading |
-| `finish_reading` | Move a currently-reading book into your read list |
-| `back_to_wishlist` | Move a currently-reading book back to the wishlist |
-| `remove_from_reading` | Remove a book from currently reading |
-| `friend_reading` | A friend's currently-reading books |
+| Tool                                               | Purpose                                                                                        |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `search_books`                                     | Fuzzy-search Open Library, returns `ol_key`s                                                   |
+| `add_book`                                         | Add a book to your list (optional rank + review)                                               |
+| `add_manual_book`                                  | Add a book that isn't in Open Library, by title/author                                         |
+| `my_books`                                         | Your ranked list with reviews                                                                  |
+| `remove_book`                                      | Remove a book by `ol_key`                                                                      |
+| `set_review`                                       | Set/update a review                                                                            |
+| `set_rank`                                         | Move one book to a new rank                                                                    |
+| `reorder_books`                                    | Reorder the whole list (full ordered array)                                                    |
+| `search_users`                                     | Find users by username or email                                                                |
+| `send_friend_request`                              | Add a friend by username/email                                                                 |
+| `friend_requests`                                  | List pending incoming + outgoing requests                                                      |
+| `accept_friend_request` / `decline_friend_request` | Answer a request                                                                               |
+| `list_friends`                                     | Your accepted friends                                                                          |
+| `friend_books`                                     | A friend's ranked list + reviews                                                               |
+| `my_wishlist`                                      | Your wishlist (each item: `owned` + `public`)                                                  |
+| `add_to_wishlist`                                  | Add to your wishlist by `ol_key` **or** `book_id` (a friend's book), optional `owned`/`public` |
+| `add_to_wishlist_manual`                           | Add a not-in-Open-Library book to your wishlist                                                |
+| `remove_from_wishlist`                             | Remove a wishlist item by `book_id`                                                            |
+| `reorder_wishlist`                                 | Reorder your wishlist (full ordered `book_id` array)                                           |
+| `set_wish_rank`                                    | Move one wishlist book to a new rank                                                           |
+| `set_owned`                                        | Mark a wishlist item owned / not owned                                                         |
+| `set_public`                                       | Set a book public/private (`list` = `read` or `wish`)                                          |
+| `friend_wishlist`                                  | A friend's public wishlist items                                                               |
+| `move_to_read`                                     | Move a wishlist item into your read list (optional `review`, `rank`)                           |
+| `my_reading`                                       | The books you're currently reading                                                             |
+| `add_to_reading`                                   | Mark a book currently reading (by `ol_key` or `book_id`)                                       |
+| `add_to_reading_manual`                            | Add a not-in-Open-Library book as currently reading                                            |
+| `finish_reading`                                   | Move a currently-reading book into your read list                                              |
+| `back_to_wishlist`                                 | Move a currently-reading book back to the wishlist                                             |
+| `remove_from_reading`                              | Remove a book from currently reading                                                           |
+| `friend_reading`                                   | A friend's currently-reading books                                                             |
 
 Send it a line of JSON-RPC over stdio to try it manually:
 
@@ -164,65 +165,65 @@ printf '%s\n' \
 All `POST`/`PATCH` bodies are JSON; auth is a session cookie (or `Authorization:
 Bearer <token>` where the token is minted via `POST /api/token`).
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/signup` | `{username, email, password}` → starts a session |
-| POST | `/api/login`  | `{usernameOrEmail, password}` → starts a session |
-| POST | `/api/logout` | ends the session |
-| GET  | `/api/me`     | current user (or `{user: null}`) |
-| POST | `/api/token`  | mint a bearer token for scripting |
-| GET  | `/api/books/search?q=` | search Open Library |
-| POST | `/api/books`  | add `{ol_key, review?, rank?, year?, public?}` to your list |
-| POST | `/api/books/manual` | add by hand `{title, author?, year?, coverUrl?, review?, rank?, public?}` |
-| GET  | `/api/me/books` | your ranked list (each with `public`) |
-| POST | `/api/me/books/reorder` | `{ordered: [bookIds]}` full order |
-| PATCH| `/api/me/books/:id` | update `{review?}`, `{rank?}` |
-| POST | `/api/me/books/:id/public` | `{public}` set a book public/private |
-| DELETE | `/api/me/books/:id` | remove |
-| GET  | `/api/me/wishlist` | your wishlist (each item: `owned`, `public`) |
-| POST | `/api/me/wishlist` | add `{ol_key?, book_id?, owned?, public?, rank?}` (book_id = someone else's book) |
-| POST | `/api/me/wishlist/manual` | add by hand `{title, author?, year?, coverUrl?, owned?, public?, rank?}` |
-| POST | `/api/me/wishlist/reorder` | `{ordered: [bookIds]}` reorder wishlist |
-| POST | `/api/me/wishlist/:id/owned` | `{owned}` mark owned / not |
-| POST | `/api/me/wishlist/:id/public` | `{public}` set a wishlist item public/private |
-| POST | `/api/me/wishlist/:id/move-to-read` | `{review?, rank?}` move wishlist → read list |
-| DELETE | `/api/me/wishlist/:id` | remove wishlist item |
-| GET  | `/api/friends/:username/wishlist` | a friend's public wishlist |
-| GET  | `/api/me/reading` | your currently-reading books |
-| POST | `/api/me/reading` | add `{ol_key?, book_id?, year?}` (currently reading) |
-| POST | `/api/me/reading/manual` | add by hand `{title, author?, year?, coverUrl?}` |
-| POST | `/api/me/reading/:id/finish` | `{review?, rank?}` move reading → read list |
-| POST | `/api/me/reading/:id/back-to-wishlist` | move reading → wishlist |
-| DELETE | `/api/me/reading/:id` | remove |
-| GET  | `/api/friends/:username/reading` | a friend's currently-reading (always visible) |
-| GET  | `/api/users/search?q=` | find users by username/email |
-| GET  | `/api/friends` | accepted friends |
-| POST | `/api/friends/requests` | `{usernameOrEmail}` send request |
-| GET  | `/api/friends/requests` | pending requests (in/out) |
-| POST | `/api/friends/requests/:id/accept` | accept |
-| POST | `/api/friends/requests/:id/decline` | decline |
-| GET  | `/api/friends/:username/books` | a friend's public books (each flagged `mine`) |
-| DELETE | `/api/friends/:id` | unfriend |
-| POST | `/api/clubs` | create `{name, description?, usernames?[]}` (invitees must be friends) |
-| GET  | `/api/clubs` | your clubs + pending invites |
-| GET  | `/api/clubs/:id` | club detail: members, nominations (with counts), your vote, current + past picks |
-| GET  | `/api/clubs/:id/events` | live club detail over Server-Sent Events (single `data:` per change; `gone` event on access loss) |
-| POST | `/api/clubs/:id/invite` | `{username}` invite a friend (members only) |
-| POST | `/api/clubs/:id/respond` | `{accept}` accept/decline your invite |
-| POST | `/api/clubs/:id/nominate` | `{ol_key?, book_id?, year?}` nominate a book (nomination stage only) |
-| POST | `/api/clubs/:id/vote` | `{nominationId}` cast/move your one vote (voting stage only) |
-| POST | `/api/clubs/:id/veto` | `{nominationId}` strike a nomination (one veto per member per vote) |
-| DELETE | `/api/clubs/:id/nominations/:nominationId` | owner: remove a nomination (accidental adds) |
-| DELETE | `/api/clubs/:id/vote` | remove your vote |
-| POST | `/api/clubs/:id/open-nominations` | owner: start a new cycle in the nomination stage |
-| POST | `/api/clubs/:id/start-voting` | owner: lock nominations and open the vote |
-| POST | `/api/clubs/:id/back-to-nominations` | owner: clear all votes and return to the nomination stage |
-| POST | `/api/clubs/:id/close-vote` | owner: a simple majority wins (otherwise a runoff is offered) |
-| POST | `/api/clubs/:id/runoff` | owner: revote among the top two vote-getters (ties included) |
-| DELETE | `/api/clubs/:id/members/:userId` | owner: remove a member / cancel invite |
-| POST | `/api/clubs/:id/leave` | member: leave the club |
-| POST | `/api/clubs/:id/transfer` | owner: `{userId}` transfer ownership to a member and leave |
-| DELETE | `/api/clubs/:id` | owner: delete the club |
+| Method | Path                                       | Description                                                                                       |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| POST   | `/api/signup`                              | `{username, email, password}` → starts a session                                                  |
+| POST   | `/api/login`                               | `{usernameOrEmail, password}` → starts a session                                                  |
+| POST   | `/api/logout`                              | ends the session                                                                                  |
+| GET    | `/api/me`                                  | current user (or `{user: null}`)                                                                  |
+| POST   | `/api/token`                               | mint a bearer token for scripting                                                                 |
+| GET    | `/api/books/search?q=`                     | search Open Library                                                                               |
+| POST   | `/api/books`                               | add `{ol_key, review?, rank?, year?, public?}` to your list                                       |
+| POST   | `/api/books/manual`                        | add by hand `{title, author?, year?, coverUrl?, review?, rank?, public?}`                         |
+| GET    | `/api/me/books`                            | your ranked list (each with `public`)                                                             |
+| POST   | `/api/me/books/reorder`                    | `{ordered: [bookIds]}` full order                                                                 |
+| PATCH  | `/api/me/books/:id`                        | update `{review?}`, `{rank?}`                                                                     |
+| POST   | `/api/me/books/:id/public`                 | `{public}` set a book public/private                                                              |
+| DELETE | `/api/me/books/:id`                        | remove                                                                                            |
+| GET    | `/api/me/wishlist`                         | your wishlist (each item: `owned`, `public`)                                                      |
+| POST   | `/api/me/wishlist`                         | add `{ol_key?, book_id?, owned?, public?, rank?}` (book_id = someone else's book)                 |
+| POST   | `/api/me/wishlist/manual`                  | add by hand `{title, author?, year?, coverUrl?, owned?, public?, rank?}`                          |
+| POST   | `/api/me/wishlist/reorder`                 | `{ordered: [bookIds]}` reorder wishlist                                                           |
+| POST   | `/api/me/wishlist/:id/owned`               | `{owned}` mark owned / not                                                                        |
+| POST   | `/api/me/wishlist/:id/public`              | `{public}` set a wishlist item public/private                                                     |
+| POST   | `/api/me/wishlist/:id/move-to-read`        | `{review?, rank?}` move wishlist → read list                                                      |
+| DELETE | `/api/me/wishlist/:id`                     | remove wishlist item                                                                              |
+| GET    | `/api/friends/:username/wishlist`          | a friend's public wishlist                                                                        |
+| GET    | `/api/me/reading`                          | your currently-reading books                                                                      |
+| POST   | `/api/me/reading`                          | add `{ol_key?, book_id?, year?}` (currently reading)                                              |
+| POST   | `/api/me/reading/manual`                   | add by hand `{title, author?, year?, coverUrl?}`                                                  |
+| POST   | `/api/me/reading/:id/finish`               | `{review?, rank?}` move reading → read list                                                       |
+| POST   | `/api/me/reading/:id/back-to-wishlist`     | move reading → wishlist                                                                           |
+| DELETE | `/api/me/reading/:id`                      | remove                                                                                            |
+| GET    | `/api/friends/:username/reading`           | a friend's currently-reading (always visible)                                                     |
+| GET    | `/api/users/search?q=`                     | find users by username/email                                                                      |
+| GET    | `/api/friends`                             | accepted friends                                                                                  |
+| POST   | `/api/friends/requests`                    | `{usernameOrEmail}` send request                                                                  |
+| GET    | `/api/friends/requests`                    | pending requests (in/out)                                                                         |
+| POST   | `/api/friends/requests/:id/accept`         | accept                                                                                            |
+| POST   | `/api/friends/requests/:id/decline`        | decline                                                                                           |
+| GET    | `/api/friends/:username/books`             | a friend's public books (each flagged `mine`)                                                     |
+| DELETE | `/api/friends/:id`                         | unfriend                                                                                          |
+| POST   | `/api/clubs`                               | create `{name, description?, usernames?[]}` (invitees must be friends)                            |
+| GET    | `/api/clubs`                               | your clubs + pending invites                                                                      |
+| GET    | `/api/clubs/:id`                           | club detail: members, nominations (with counts), your vote, current + past picks                  |
+| GET    | `/api/clubs/:id/events`                    | live club detail over Server-Sent Events (single `data:` per change; `gone` event on access loss) |
+| POST   | `/api/clubs/:id/invite`                    | `{username}` invite a friend (members only)                                                       |
+| POST   | `/api/clubs/:id/respond`                   | `{accept}` accept/decline your invite                                                             |
+| POST   | `/api/clubs/:id/nominate`                  | `{ol_key?, book_id?, year?}` nominate a book (nomination stage only)                              |
+| POST   | `/api/clubs/:id/vote`                      | `{nominationId}` cast/move your one vote (voting stage only)                                      |
+| POST   | `/api/clubs/:id/veto`                      | `{nominationId}` strike a nomination (one veto per member per vote)                               |
+| DELETE | `/api/clubs/:id/nominations/:nominationId` | owner: remove a nomination (accidental adds)                                                      |
+| DELETE | `/api/clubs/:id/vote`                      | remove your vote                                                                                  |
+| POST   | `/api/clubs/:id/open-nominations`          | owner: start a new cycle in the nomination stage                                                  |
+| POST   | `/api/clubs/:id/start-voting`              | owner: lock nominations and open the vote                                                         |
+| POST   | `/api/clubs/:id/back-to-nominations`       | owner: clear all votes and return to the nomination stage                                         |
+| POST   | `/api/clubs/:id/close-vote`                | owner: a simple majority wins (otherwise a runoff is offered)                                     |
+| POST   | `/api/clubs/:id/runoff`                    | owner: revote among the top two vote-getters (ties included)                                      |
+| DELETE | `/api/clubs/:id/members/:userId`           | owner: remove a member / cancel invite                                                            |
+| POST   | `/api/clubs/:id/leave`                     | member: leave the club                                                                            |
+| POST   | `/api/clubs/:id/transfer`                  | owner: `{userId}` transfer ownership to a member and leave                                        |
+| DELETE | `/api/clubs/:id`                           | owner: delete the club                                                                            |
 
 ## Notes
 
