@@ -1,4 +1,5 @@
 import { execute, now, queryAll, queryOne } from "./db";
+import { groupNotifications, isActionable, type NotificationItem } from "./notifications";
 import { fetchWork, type OLWork } from "./ol";
 
 export interface User {
@@ -921,7 +922,7 @@ export async function sendFriendRequest(
     await execute(db, "UPDATE friendships SET status = 'accepted' WHERE id = ?", existing.id);
     // The pending request notification belongs to the current user (they received the original request)
     await dismissFriendRequestNotification(db, requesterId, existing.id);
-    await createNotification(db, target.id, "friend_accepted", `@${requesterName} accepted your friend request`, {
+    await createNotification(db, target.id, "friend_accepted", `${requesterName} accepted your friend request`, {
       userId: requesterId,
       username: requesterName,
     });
@@ -941,7 +942,7 @@ export async function sendFriendRequest(
     target.id,
   );
   if (friendship) {
-    await createNotification(db, target.id, "friend_request", `@${requesterName} sent you a friend request`, {
+    await createNotification(db, target.id, "friend_request", `${requesterName} sent you a friend request`, {
       requestId: friendship.id,
       userId: requesterId,
       username: requesterName,
@@ -993,7 +994,7 @@ export async function acceptFriendRequest(
       db,
       f.requester_id,
       "friend_accepted",
-      `@${accepter.username} accepted your friend request`,
+      `${accepter.username} accepted your friend request`,
       { userId, username: accepter.username },
     );
   }
@@ -1287,7 +1288,7 @@ export async function getAdminUsers(db: D1Database): Promise<{ id: number; usern
   return await queryAll<{ id: number; username: string }>(db, "SELECT id, username FROM users WHERE is_admin = 1");
 }
 
-export interface Notification {
+interface Notification {
   id: number;
   user_id: number;
   type: string;
@@ -1314,11 +1315,17 @@ export async function createNotification(
   );
 }
 
-export async function getNotifications(db: D1Database, userId: number, unreadOnly = false): Promise<Notification[]> {
-  const query = unreadOnly
-    ? "SELECT * FROM notifications WHERE user_id = ? AND read = 0 ORDER BY created_at DESC"
-    : "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC";
-  const notifications = await queryAll<Notification>(db, query, userId);
+// How long dismissed notifications stay visible under "Earlier" in the panel.
+const READ_NOTIFICATION_DAYS = 7;
+
+// Unread rows plus recently read ones, with live status merged into data.
+async function getNotificationRows(db: D1Database, userId: number): Promise<Notification[]> {
+  const notifications = await queryAll<Notification>(
+    db,
+    "SELECT * FROM notifications WHERE user_id = ? AND (read = 0 OR created_at > ?) ORDER BY created_at DESC",
+    userId,
+    now() - READ_NOTIFICATION_DAYS * 86400,
+  );
 
   // For new_user_signup notifications, enrich with current user status
   for (const n of notifications) {
@@ -1354,26 +1361,45 @@ export async function getNotifications(db: D1Database, userId: number, unreadOnl
         // Ignore parse errors
       }
     }
+    // For club_invite notifications, an invite the owner cancelled is no longer actionable
+    if (n.type === "club_invite" && n.data) {
+      try {
+        const data = JSON.parse(n.data);
+        if (data.clubId) {
+          const membership = await getClubMembership(db, data.clubId, userId);
+          n.data = JSON.stringify({ ...data, status: membership?.status ?? "cancelled" });
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    }
   }
 
   return notifications;
 }
 
-export async function getUnreadNotificationCount(db: D1Database, userId: number): Promise<number> {
-  const row = await queryOne<{ count: number }>(
+export async function getNotifications(
+  db: D1Database,
+  userId: number,
+): Promise<{ notifications: NotificationItem[]; unreadCount: number }> {
+  const notifications = groupNotifications(await getNotificationRows(db, userId));
+  return { notifications, unreadCount: notifications.filter((n) => !n.read).length };
+}
+
+// Opening the panel counts as reading everything that doesn't need a response.
+export async function markInformationalNotificationsRead(db: D1Database, userId: number): Promise<void> {
+  const ids = (await getNotificationRows(db, userId)).filter((n) => !n.read && !isActionable(n)).map((n) => n.id);
+  if (ids.length === 0) return;
+  await execute(
     db,
-    "SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND read = 0",
+    `UPDATE notifications SET read = 1 WHERE user_id = ? AND id IN (${ids.map(() => "?").join(",")})`,
     userId,
+    ...ids,
   );
-  return row?.count ?? 0;
 }
 
 export async function dismissNotification(db: D1Database, userId: number, notificationId: number): Promise<void> {
   await execute(db, "UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?", notificationId, userId);
-}
-
-export async function dismissAllNotifications(db: D1Database, userId: number): Promise<void> {
-  await execute(db, "UPDATE notifications SET read = 1 WHERE user_id = ?", userId);
 }
 
 export async function approveUser(db: D1Database, userId: number): Promise<void> {
@@ -1583,7 +1609,7 @@ export async function createClub(
       target.id,
       creatorId,
     );
-    await createNotification(db, target.id, "club_invite", `@${creatorName} invited you to the club "${cleanName}"`, {
+    await createNotification(db, target.id, "club_invite", `${creatorName} invited you to the club "${cleanName}"`, {
       clubId: club.id,
       name: cleanName,
       userId: creatorId,
@@ -1749,7 +1775,7 @@ export async function inviteToClub(
     target.id,
     inviterId,
   );
-  await createNotification(db, target.id, "club_invite", `@${inviterName} invited you to the club "${club.name}"`, {
+  await createNotification(db, target.id, "club_invite", `${inviterName} invited you to the club "${club.name}"`, {
     clubId,
     name: club.name,
     userId: inviterId,
@@ -1778,7 +1804,7 @@ export async function respondToClubInvite(
         db,
         membership.invited_by,
         "club_joined",
-        `@${joiner.username} joined the club "${club.name}"`,
+        `${joiner.username} joined the club "${club.name}"`,
         { clubId, name: club.name, userId, username: joiner.username },
       );
     }
@@ -1847,7 +1873,7 @@ export async function nominateBook(
     clubId,
     userId,
     "club_nomination",
-    `@${nominator?.username ?? "Someone"} nominated "${book.title}" in "${club.name}"`,
+    `${nominator?.username ?? "Someone"} nominated "${book.title}" in "${club.name}"`,
     { clubId, name: club.name, nominationBook: book.title },
   );
 
@@ -1963,7 +1989,7 @@ export async function vetoNomination(
     clubId,
     userId,
     "club_veto",
-    `@${vetoer?.username ?? "Someone"} vetoed "${nomination.title}" in "${club.name}"`,
+    `${vetoer?.username ?? "Someone"} vetoed "${nomination.title}" in "${club.name}"`,
     { clubId, name: club.name, bookTitle: nomination.title },
   );
   return { ok: true };
@@ -2002,7 +2028,7 @@ export async function removeNomination(
     clubId,
     userId,
     "club_nomination_removed",
-    `@${owner?.username ?? "Someone"} removed "${nomination.title}" from the vote in "${club.name}"`,
+    `${owner?.username ?? "Someone"} removed "${nomination.title}" from the vote in "${club.name}"`,
     { clubId, name: club.name, bookTitle: nomination.title },
   );
   return { ok: true };
@@ -2358,7 +2384,7 @@ export async function transferClubOwnership(
       db,
       targetUserId,
       "club_owner",
-      `@${oldOwner?.username ?? "Someone"} transferred ownership of "${club.name}" to you`,
+      `${oldOwner?.username ?? "Someone"} transferred ownership of "${club.name}" to you`,
       { clubId, name: club.name, userId, username: oldOwner?.username },
     );
   }

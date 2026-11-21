@@ -1155,11 +1155,18 @@ textarea:focus {
   overflow-y: auto;
 }
 
-.notifications-actions {
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border);
-  font-size: var(--font-sm);
-  text-align: right;
+.notification-section {
+  margin: 0;
+}
+
+.notification-section-title {
+  margin: 0;
+  padding: 12px 20px 4px;
+  color: var(--muted);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .notification-item {
@@ -1183,10 +1190,6 @@ textarea:focus {
   min-width: 0;
 }
 
-.notification-content .badge {
-  margin: 8px 0 0;
-}
-
 .notification-message {
   margin-bottom: 4px;
   font-size: var(--font-md);
@@ -1196,6 +1199,19 @@ textarea:focus {
 .notification-time {
   color: var(--muted);
   font-size: var(--font-xs);
+}
+
+.notification-details {
+  margin: 4px 0 6px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+}
+
+.notification-link {
+  margin-top: 6px;
+  font-size: var(--font-sm);
 }
 
 .notification-actions {

@@ -38,7 +38,7 @@ export default function UserMenu({ username, onAccount, onLogout }: UserMenuProp
         aria-expanded={open}
         title="Account menu"
       >
-        <span className="user-menu-name">@{username}</span>
+        <span className="user-menu-name">{username}</span>
         <IconChevronDown size={14} className={`user-menu-chevron${open ? " open" : ""}`} />
       </button>
       <AnimatePresence>

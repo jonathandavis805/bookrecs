@@ -306,7 +306,7 @@ export default function Profile({ username, me }: Props) {
     <div className="page">
       {readError && (
         <div className="error">
-          {isSelf ? readError : `You're not friends with @${username} yet. Add them in "Friends" to see their books.`}
+          {isSelf ? readError : `You're not friends with ${username} yet. Add them in "Friends" to see their books.`}
         </div>
       )}
 
@@ -319,7 +319,7 @@ export default function Profile({ username, me }: Props) {
             <div className="empty muted">
               {isSelf
                 ? 'Nothing here. Mark a book "Reading" to track what you\'re on.'
-                : `@${username} isn't reading anything right now.`}
+                : `${username} isn't reading anything right now.`}
             </div>
           ) : (
             <ul className="book-list">
@@ -388,7 +388,7 @@ export default function Profile({ username, me }: Props) {
                     <div className="author">
                       {nextUp.reason === "owned"
                         ? `You own this · #${nextUp.rank} on wishlist`
-                        : `@${nextUp.friendUsername} has this · #${nextUp.rank} on wishlist`}
+                        : `${nextUp.friendUsername} has this · #${nextUp.rank} on wishlist`}
                     </div>
                   </div>
                   <div className="actions">
@@ -471,7 +471,7 @@ export default function Profile({ username, me }: Props) {
               <p className="muted">
                 {isSelf
                   ? 'Nothing here yet. Add a friend\'s book, or search and pick "Wishlist".'
-                  : `@${username} has no public wishlist items yet.`}
+                  : `${username} has no public wishlist items yet.`}
               </p>
             </div>
           ) : isSelf ? (
