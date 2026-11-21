@@ -39,6 +39,7 @@ function asD1(sqlite: Database): D1Database {
 
 export function createTestDb(): D1Database {
   const sqlite = new Database(":memory:");
+  sqlite.run("PRAGMA foreign_keys = ON"); // D1 enforces foreign keys; bun:sqlite does not by default
   migrate(sqlite);
   return asD1(sqlite);
 }

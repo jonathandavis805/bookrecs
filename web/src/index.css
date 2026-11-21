@@ -375,6 +375,62 @@ textarea:focus {
   color: var(--on-accent);
 }
 
+/* ---------- Categories ---------- */
+.category-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.category-actions,
+.category-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.category-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: var(--font-md);
+}
+
+.category-adder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.category-adder-toggle {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.category-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: var(--font-sm);
+}
+
+.category-tags .badge {
+  margin-left: 0;
+}
+
+.category-tags .chip-picker {
+  flex-basis: 100%;
+  gap: 6px;
+}
+
 /* ---------- Feedback ---------- */
 .error,
 .success {

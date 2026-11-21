@@ -25,6 +25,12 @@ export interface Book {
   mine?: "read" | "wish" | "reading" | null;
   isReading?: boolean;
   synopsis?: string | null;
+  category_ids: number[];
+}
+
+export interface Category {
+  id: number;
+  name: string;
 }
 
 export interface SearchHit {

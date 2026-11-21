@@ -32,6 +32,7 @@ async function readBody(req: Request): Promise<any> {
 }
 
 const optionalNumber = (v: unknown) => (v == null || v === "" ? undefined : Number(v));
+const idList = (v: unknown) => (Array.isArray(v) ? v.map(Number) : []);
 
 function getClientIp(req: Request): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? req.headers.get("cf-connecting-ip") ?? "unknown";
@@ -316,6 +317,7 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
       isPublic: body.public,
     });
     if (!r.ok) return failure(r);
+    if (body.category_ids) await core.setBookCategories(db, user.id, r.book.id, idList(body.category_ids));
     return json({ book: r.book, books: await core.listReads(db, user.id) });
   }
   if (path === "/api/me/books" && method === "GET") {
@@ -324,6 +326,7 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const { count, limit } = await core.getBookAllowance(db, user.id);
     return json({
       books: books.map((b) => ({ ...b, isReading: reading.has(b.book_id) })),
+      categories: await core.listCategories(db, user.id),
       bookCount: count,
       maxBooks: limit,
     });
@@ -331,6 +334,13 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (path === "/api/me/books/reorder" && method === "POST") {
     const { ordered } = await readBody(req);
     await core.reorderList(db, "reads", user.id, Array.isArray(ordered) ? ordered.map(Number) : []);
+    return json({ books: await core.listReads(db, user.id) });
+  }
+  const bookCategories = path.match(/^\/api\/me\/books\/(\d+)\/categories$/);
+  if (bookCategories && method === "POST") {
+    const { category_ids } = await readBody(req);
+    const r = await core.setBookCategories(db, user.id, Number(bookCategories[1]), idList(category_ids));
+    if (!r.ok) return failure(r);
     return json({ books: await core.listReads(db, user.id) });
   }
   const readMatch = path.match(/^\/api\/me\/books\/(\d+)$/);
@@ -361,6 +371,33 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     return json({ books: list === "reads" ? await core.listReads(db, user.id) : await core.listWishlist(db, user.id) });
   }
 
+  // ----- categories -----
+  const categories = async () => json({ categories: await core.listCategories(db, user.id) });
+  if (path === "/api/me/categories" && method === "GET") return await categories();
+  if (path === "/api/me/categories" && method === "POST") {
+    const { name } = await readBody(req);
+    const r = await core.createCategory(db, user.id, name);
+    if (!r.ok) return failure(r);
+    return json({ category: r.category, categories: await core.listCategories(db, user.id) });
+  }
+  const categoryReorder = path.match(/^\/api\/me\/categories\/(\d+)\/reorder$/);
+  if (categoryReorder && method === "POST") {
+    const { ordered } = await readBody(req);
+    const r = await core.reorderCategory(db, user.id, Number(categoryReorder[1]), idList(ordered));
+    if (!r.ok) return failure(r);
+    return json({ books: await core.listReads(db, user.id) });
+  }
+  const categoryMatch = path.match(/^\/api\/me\/categories\/(\d+)$/);
+  if (categoryMatch && method === "PATCH") {
+    const { name } = await readBody(req);
+    const r = await core.renameCategory(db, user.id, Number(categoryMatch[1]), name);
+    return r.ok ? await categories() : failure(r);
+  }
+  if (categoryMatch && method === "DELETE") {
+    const r = await core.deleteCategory(db, user.id, Number(categoryMatch[1]));
+    return r.ok ? await categories() : failure(r);
+  }
+
   // ----- wishlist -----
   if (path === "/api/me/next-up" && method === "GET") return json({ books: await core.getNextUp(db, user.id) });
   if (path === "/api/me/wishlist" && method === "GET") return json({ books: await core.listWishlist(db, user.id) });
@@ -385,9 +422,11 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   }
   const wishMove = path.match(/^\/api\/me\/wishlist\/(\d+)\/move-to-read$/);
   if (wishMove && method === "POST") {
-    const { review, rank } = await readBody(req);
-    const r = await core.moveToRead(db, user.id, Number(wishMove[1]), { review, rank: optionalNumber(rank) });
+    const { review, rank, category_ids } = await readBody(req);
+    const bookId = Number(wishMove[1]);
+    const r = await core.moveToRead(db, user.id, bookId, { review, rank: optionalNumber(rank) });
     if (!r.ok) return failure(r);
+    if (category_ids) await core.setBookCategories(db, user.id, bookId, idList(category_ids));
     return json({ ok: true, ...(await lists()) });
   }
   const wishOwned = path.match(/^\/api\/me\/wishlist\/(\d+)\/owned$/);
@@ -423,9 +462,11 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   }
   const readingFinish = path.match(/^\/api\/me\/reading\/(\d+)\/finish$/);
   if (readingFinish && method === "POST") {
-    const { review, rank } = await readBody(req);
-    const r = await core.finishReading(db, user.id, Number(readingFinish[1]), { review, rank: optionalNumber(rank) });
+    const { review, rank, category_ids } = await readBody(req);
+    const bookId = Number(readingFinish[1]);
+    const r = await core.finishReading(db, user.id, bookId, { review, rank: optionalNumber(rank) });
     if (!r.ok) return failure(r);
+    if (category_ids) await core.setBookCategories(db, user.id, bookId, idList(category_ids));
     return json({ ok: true, ...(await lists()) });
   }
   const readingBack = path.match(/^\/api\/me\/reading\/(\d+)\/back-to-wishlist$/);
@@ -466,7 +507,12 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (friendList && method === "GET") {
     const list = friendList[2] as core.FriendList;
     const r = await core.getFriendList(db, user.id, decodeURIComponent(friendList[1]), list);
-    return r.ok ? json({ user: r.user, books: r.books }) : failure(r);
+    if (!r.ok) return failure(r);
+    return json({
+      user: r.user,
+      books: r.books,
+      categories: list === "books" ? await core.listCategories(db, r.user.id, true) : undefined,
+    });
   }
   const unfriend = path.match(/^\/api\/friends\/(\d+)$/);
   if (unfriend && method === "DELETE") {

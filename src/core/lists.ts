@@ -6,6 +6,7 @@ import { fail, notFound, type Result } from "./result";
 export interface ReadRow extends BookRow {
   book_id: number;
   rank: number;
+  category_ids: number[];
   review: string | null;
   public: number;
   created_at: number;
@@ -47,7 +48,7 @@ async function onList(db: D1Database, list: List, userId: number, bookId: number
 
 // ---------- Ranked lists (reads and wishlist share ordering rules) ----------
 
-async function rankedIds(db: D1Database, list: RankedList, userId: number): Promise<number[]> {
+export async function rankedIds(db: D1Database, list: RankedList, userId: number): Promise<number[]> {
   const rows = await queryAll<{ book_id: number }>(
     db,
     `SELECT book_id FROM ${list} WHERE user_id = ? ORDER BY rank ASC, book_id ASC`,
@@ -56,7 +57,7 @@ async function rankedIds(db: D1Database, list: RankedList, userId: number): Prom
   return rows.map((r) => r.book_id);
 }
 
-async function writeRanks(db: D1Database, list: RankedList, userId: number, ids: number[]): Promise<void> {
+export async function writeRanks(db: D1Database, list: RankedList, userId: number, ids: number[]): Promise<void> {
   if (ids.length === 0) return;
   const touch = list === "reads" ? `, updated_at = ${now()}` : "";
   await db.batch(
@@ -68,15 +69,18 @@ async function writeRanks(db: D1Database, list: RankedList, userId: number, ids:
 
 // The requested ids come first in the given order; anything left out keeps
 // its relative position after them. Unknown or repeated ids are ignored.
+export function requestedOrder(current: number[], requested: number[]): number[] {
+  const given = [...new Set(requested)].filter((id) => current.includes(id));
+  return [...given, ...current.filter((id) => !given.includes(id))];
+}
+
 export async function reorderList(
   db: D1Database,
   list: RankedList,
   userId: number,
   requested: number[],
 ): Promise<void> {
-  const current = await rankedIds(db, list, userId);
-  const given = [...new Set(requested)].filter((id) => current.includes(id));
-  await writeRanks(db, list, userId, [...given, ...current.filter((id) => !given.includes(id))]);
+  await writeRanks(db, list, userId, requestedOrder(await rankedIds(db, list, userId), requested));
 }
 
 // Inserts at the requested rank (shifting the rest down), or at the end.
@@ -129,13 +133,16 @@ export async function setVisibility(
 // ---------- Reads ----------
 
 export async function listReads(db: D1Database, userId: number, publicOnly = false): Promise<ReadRow[]> {
-  return await queryAll<ReadRow>(
+  const rows = await queryAll<Omit<ReadRow, "category_ids"> & { category_ids: string }>(
     db,
-    `SELECT r.book_id, r.rank, r.review, r.public, r.created_at, r.updated_at, ${BOOK_COLUMNS}
+    `SELECT r.book_id, r.rank, r.review, r.public, r.created_at, r.updated_at, ${BOOK_COLUMNS},
+       (SELECT json_group_array(cb.category_id) FROM category_books cb
+        WHERE cb.user_id = r.user_id AND cb.book_id = r.book_id) AS category_ids
      FROM reads r JOIN books b ON b.id = r.book_id
      WHERE r.user_id = ? ${publicOnly ? "AND r.public = 1" : ""} ORDER BY r.rank ASC`,
     userId,
   );
+  return rows.map((r) => ({ ...r, category_ids: JSON.parse(r.category_ids) }));
 }
 
 interface ReadOptions {

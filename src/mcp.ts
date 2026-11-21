@@ -27,6 +27,7 @@ const bookId = num("Book id, as returned by the list tools");
 const username = str("Friend's username");
 const rank = num("Optional 1-based position (defaults to the end)");
 const isPublic = bool("Visible to friends");
+const categoryIds = ids("Category ids, from my_categories");
 const manual = {
   title: str("Book title"),
   author: str(),
@@ -45,25 +46,32 @@ const tools: Tool[] = [
   },
   {
     name: "my_books",
-    description: "The user's ranked list of books read (rank 1 = top), with reviews.",
+    description:
+      "The user's ranked list of books read (rank 1 = top), with reviews, category_ids and the user's categories.",
     request: () => ["GET", "/api/me/books"],
   },
   {
     name: "add_book",
     description: "Add an Open Library book to the user's read list.",
-    properties: { ol_key: str("Open Library work key, e.g. /works/OL123W"), review: str(), rank, public: isPublic },
+    properties: {
+      ol_key: str("Open Library work key, e.g. /works/OL123W"),
+      review: str(),
+      rank,
+      public: isPublic,
+      category_ids: categoryIds,
+    },
     required: ["ol_key"],
     request: (a) => ["POST", "/api/books", a],
   },
   {
     name: "add_manual_book",
     description: "Add a book that isn't on Open Library to the user's read list.",
-    properties: { ...manual, review: str(), rank, public: isPublic },
+    properties: { ...manual, review: str(), rank, public: isPublic, category_ids: categoryIds },
     required: ["title"],
     request: (a) => [
       "POST",
       "/api/books/manual",
-      { ...manualBody(a), review: a.review, rank: a.rank, public: a.public },
+      { ...manualBody(a), review: a.review, rank: a.rank, public: a.public, category_ids: a.category_ids },
     ],
   },
   {
@@ -93,6 +101,47 @@ const tools: Tool[] = [
     properties: { book_ids: ids("Book ids, top first") },
     required: ["book_ids"],
     request: (a) => ["POST", "/api/me/books/reorder", { ordered: a.book_ids }],
+  },
+  {
+    name: "my_categories",
+    description: "The user's categories for books read.",
+    request: () => ["GET", "/api/me/categories"],
+  },
+  {
+    name: "create_category",
+    description: "Create a category for books read.",
+    properties: { name: str() },
+    required: ["name"],
+    request: (a) => ["POST", "/api/me/categories", { name: a.name }],
+  },
+  {
+    name: "rename_category",
+    description: "Rename one of the user's categories.",
+    properties: { category_id: num(), name: str() },
+    required: ["category_id", "name"],
+    request: (a) => ["PATCH", `/api/me/categories/${seg(a.category_id)}`, { name: a.name }],
+  },
+  {
+    name: "delete_category",
+    description: "Delete a category. Its books stay on the read list.",
+    properties: { category_id: num() },
+    required: ["category_id"],
+    request: (a) => ["DELETE", `/api/me/categories/${seg(a.category_id)}`],
+  },
+  {
+    name: "set_book_categories",
+    description: "Replace the categories of a book on the read list (empty list removes it from all).",
+    properties: { book_id: bookId, category_ids: categoryIds },
+    required: ["book_id", "category_ids"],
+    request: (a) => ["POST", `/api/me/books/${seg(a.book_id)}/categories`, { category_ids: a.category_ids }],
+  },
+  {
+    name: "reorder_category",
+    description:
+      "Reorder the books in a category. They swap among the overall positions they already hold, so books outside the category keep their rank. Books left out keep their order after the given ones.",
+    properties: { category_id: num(), book_ids: ids("Book ids in the category, top first") },
+    required: ["category_id", "book_ids"],
+    request: (a) => ["POST", `/api/me/categories/${seg(a.category_id)}/reorder`, { ordered: a.book_ids }],
   },
   {
     name: "set_public",
@@ -137,9 +186,13 @@ const tools: Tool[] = [
   {
     name: "move_to_read",
     description: "Move a wishlist book to the read list.",
-    properties: { book_id: bookId, review: str(), rank },
+    properties: { book_id: bookId, review: str(), rank, category_ids: categoryIds },
     required: ["book_id"],
-    request: (a) => ["POST", `/api/me/wishlist/${seg(a.book_id)}/move-to-read`, { review: a.review, rank: a.rank }],
+    request: (a) => [
+      "POST",
+      `/api/me/wishlist/${seg(a.book_id)}/move-to-read`,
+      { review: a.review, rank: a.rank, category_ids: a.category_ids },
+    ],
   },
   {
     name: "remove_from_wishlist",
@@ -176,9 +229,13 @@ const tools: Tool[] = [
   {
     name: "finish_reading",
     description: "Finish a book: it moves to the read list.",
-    properties: { book_id: bookId, review: str(), rank },
+    properties: { book_id: bookId, review: str(), rank, category_ids: categoryIds },
     required: ["book_id"],
-    request: (a) => ["POST", `/api/me/reading/${seg(a.book_id)}/finish`, { review: a.review, rank: a.rank }],
+    request: (a) => [
+      "POST",
+      `/api/me/reading/${seg(a.book_id)}/finish`,
+      { review: a.review, rank: a.rank, category_ids: a.category_ids },
+    ],
   },
   {
     name: "back_to_wishlist",
