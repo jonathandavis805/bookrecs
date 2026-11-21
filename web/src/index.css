@@ -285,9 +285,13 @@ textarea:focus {
   width: 32px;
   height: 18px;
   padding: 0;
-  border: 1px solid var(--border-strong);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: var(--radius-pill);
-  background: transparent;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.switch:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .switch .knob {
@@ -297,7 +301,7 @@ textarea:focus {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--border-strong);
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
   transition:
     transform 0.15s ease,
     background-color 0.15s ease;
@@ -311,7 +315,7 @@ textarea:focus {
 
 .switch.on .knob {
   transform: translateX(14px);
-  background: var(--card);
+  background: var(--on-accent);
 }
 
 /* ---------- Segmented control ---------- */
@@ -340,6 +344,8 @@ textarea:focus {
 
 .segmented.compact {
   padding: 2px;
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .segmented.compact button {
@@ -355,6 +361,11 @@ textarea:focus {
   background: var(--card);
   box-shadow: var(--shadow-sm);
   color: var(--text);
+}
+
+.segmented.compact button.active {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 /* ---------- Chips ---------- */
