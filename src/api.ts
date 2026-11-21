@@ -65,6 +65,7 @@ function publicUser(u: core.User) {
     is_admin: u.is_admin,
     bookLimit: u.book_limit === 0 ? null : u.book_limit,
     discoverable: !!u.discoverable,
+    theme: u.theme ? JSON.parse(u.theme) : null,
   };
 }
 
@@ -258,6 +259,14 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     const { discoverable } = await readBody(req);
     await core.setDiscoverable(db, user.id, !!discoverable);
     return json({ ok: true, discoverable: !!discoverable });
+  }
+  if (path === "/api/me/theme" && method === "POST") {
+    const { theme } = await readBody(req);
+    const stored = JSON.stringify(theme);
+    // The client validates on load; the server only keeps junk and huge blobs out.
+    if (!theme || typeof theme !== "object" || stored.length > 2000) return json({ error: "Invalid theme" }, 400);
+    await core.setTheme(db, user.id, stored);
+    return json({ ok: true });
   }
   if (path === "/api/token" && method === "POST") {
     const token = auth.randomToken(24);

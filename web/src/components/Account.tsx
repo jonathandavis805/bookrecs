@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage, type User } from "../api";
+import Appearance from "./Appearance";
 import { Switch } from "./ui/Switch";
 
 interface AccountProps {
@@ -91,6 +92,8 @@ export default function Account({ user, onChangePassword }: AccountProps) {
           </button>
         )}
       </section>
+
+      <Appearance />
     </div>
   );
 }
