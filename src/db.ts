@@ -5,7 +5,7 @@ export function now(): number {
 }
 
 // Helper to run a D1 query and return a single row
-export async function queryOne<T>(db: D1Database, sql: string, ...params: any[]): Promise<T | null> {
+export async function queryOne<T>(db: D1Database, sql: string, ...params: unknown[]): Promise<T | null> {
   const { results } = await db
     .prepare(sql)
     .bind(...params)
@@ -14,7 +14,7 @@ export async function queryOne<T>(db: D1Database, sql: string, ...params: any[])
 }
 
 // Helper to run a D1 query and return all rows
-export async function queryAll<T>(db: D1Database, sql: string, ...params: any[]): Promise<T[]> {
+export async function queryAll<T>(db: D1Database, sql: string, ...params: unknown[]): Promise<T[]> {
   const { results } = await db
     .prepare(sql)
     .bind(...params)
@@ -23,7 +23,7 @@ export async function queryAll<T>(db: D1Database, sql: string, ...params: any[])
 }
 
 // Helper to run a D1 write (INSERT/UPDATE/DELETE)
-export async function execute(db: D1Database, sql: string, ...params: any[]): Promise<D1Result> {
+export async function execute(db: D1Database, sql: string, ...params: unknown[]): Promise<D1Result> {
   return await db
     .prepare(sql)
     .bind(...params)

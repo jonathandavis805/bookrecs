@@ -18,4 +18,6 @@
 - Buttons: bare `<button>` for quiet actions, `.btn-primary` for the main action, `.btn-secondary` for outlined, `.btn-danger` for destructive confirms, `.danger` / `.link` / `.icon-btn` for inline variants, `.btn-sm` to shrink any of them.
 - The header switches to its stacked layout when the one-row version actually wraps (`useStackWhenWrapped` in `App.tsx`), not at a fixed width. Don't add width breakpoints for it; tabs and usernames of any length are handled.
 - Project-specific Biome rules (no emoji glyphs, no inline styles) are GritQL plugins in `lint/`.
-- The backend (`src/`) isn't typechecked yet: it has ~230 pre-existing type errors.
+- Backend domain logic lives in `src/core/` (one module per area). Operations that can be refused return a `Result`: `fail` (400), `forbidden` (403) or `notFound` (404); routes answer with `failure(r)` and never inspect error text.
+- API behaviour is tested through `handleApi` against an in-memory D1 (`src/test/d1.ts`) in `src/api.test.ts`; add a test there when changing a route.
+- `src/mcp.ts` is a client of the HTTP API, authenticated with a user's API token; add tools by mapping them onto routes, not by calling core.

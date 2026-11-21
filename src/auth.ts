@@ -1,74 +1,48 @@
 import { execute, now, queryOne } from "./db";
 
-const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days
+export const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days
 
 export function randomToken(bytes = 32): string {
   const b = crypto.getRandomValues(new Uint8Array(bytes));
   return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-// PBKDF2 password hashing using Web Crypto API (Workers-compatible)
+// PBKDF2 password hashing using Web Crypto API (Workers-compatible).
+// Stored as iterations:salt:hash, both base64.
 const PBKDF2_ITERATIONS = 100000;
 const SALT_LENGTH = 16;
 const KEY_LENGTH = 32;
 
-export async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
-  const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), { name: "PBKDF2" }, false, [
+async function derive(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number): Promise<Uint8Array> {
+  const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
     "deriveBits",
   ]);
-
   const bits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: PBKDF2_ITERATIONS,
-      hash: "SHA-256",
-    },
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
     keyMaterial,
     KEY_LENGTH * 8,
   );
-
-  // Format: iterations:salt:hash (all base64)
-  const saltB64 = btoa(String.fromCharCode(...salt));
-  const hashB64 = btoa(String.fromCharCode(...new Uint8Array(bits)));
-  return `${PBKDF2_ITERATIONS}:${saltB64}:${hashB64}`;
+  return new Uint8Array(bits);
 }
 
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const parts = hash.split(":");
-  if (parts.length !== 3) return false;
+const toBase64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+const fromBase64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
-  const [iterationsStr, saltB64, hashB64] = parts;
-  const iterations = parseInt(iterationsStr, 10);
-  const salt = Uint8Array.from(atob(saltB64), (c) => c.charCodeAt(0));
-  const expectedHash = Uint8Array.from(atob(hashB64), (c) => c.charCodeAt(0));
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+  const hash = await derive(password, salt, PBKDF2_ITERATIONS);
+  return `${PBKDF2_ITERATIONS}:${toBase64(salt)}:${toBase64(hash)}`;
+}
 
-  const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), { name: "PBKDF2" }, false, [
-    "deriveBits",
-  ]);
-
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations,
-      hash: "SHA-256",
-    },
-    keyMaterial,
-    KEY_LENGTH * 8,
-  );
-
-  const actualHash = new Uint8Array(bits);
-
-  // Constant-time comparison
-  if (actualHash.length !== expectedHash.length) return false;
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const [iterations, salt, expected] = stored.split(":");
+  if (!expected) return false;
+  const actual = await derive(password, fromBase64(salt), Number.parseInt(iterations, 10));
+  const want = fromBase64(expected);
+  if (actual.length !== want.length) return false;
+  // Constant-time comparison.
   let diff = 0;
-  for (let i = 0; i < actualHash.length; i++) {
-    diff |= actualHash[i] ^ expectedHash[i];
-  }
+  for (let i = 0; i < actual.length; i++) diff |= actual[i] ^ want[i];
   return diff === 0;
 }
 
@@ -90,11 +64,9 @@ export async function getUserIdByToken(db: D1Database, token: string): Promise<n
     "SELECT user_id, expires_at FROM sessions WHERE token = ?",
     token,
   );
-
   if (!row) return null;
-
   if (row.expires_at < now()) {
-    await execute(db, "DELETE FROM sessions WHERE token = ?", token);
+    await deleteSession(db, token);
     return null;
   }
   return row.user_id;

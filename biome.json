@@ -29,8 +29,14 @@
     }
   },
   "plugins": [
-    { "path": "./lint/no-emoji.grit", "includes": ["web/src/**/*.tsx"] },
-    { "path": "./lint/no-inline-styles.grit", "includes": ["web/src/**/*.tsx"] }
+    {
+      "path": "./lint/no-emoji.grit",
+      "includes": ["web/src/**/*.tsx"]
+    },
+    {
+      "path": "./lint/no-inline-styles.grit",
+      "includes": ["web/src/**/*.tsx"]
+    }
   ],
   "linter": {
     "enabled": true,
@@ -56,17 +62,6 @@
       }
     }
   },
-  "overrides": [
-    {
-      "includes": ["src/**", "scripts/**", "functions/**"],
-      "linter": {
-        "rules": {
-          "style": { "noNonNullAssertion": "off" },
-          "suspicious": { "noExplicitAny": "off" }
-        }
-      }
-    }
-  ],
   "assist": {
     "enabled": true,
     "actions": {

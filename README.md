@@ -25,7 +25,7 @@ Runs on **Cloudflare Workers** + **D1** + **Pages**.
 - **Runtime:** [Cloudflare Workers](https://workers.cloudflare.com) (serverless edge runtime)
 - **Data:** [Cloudflare D1](https://www.cloudflare.com/developer-platform/d1/) (serverless SQLite)
 - **Frontend:** React + Vite, deployed to Cloudflare Pages
-- **Auth:** username/email + password (argon2), self-signup, HttpOnly session cookie
+- **Auth:** username/email + password (PBKDF2), self-signup, HttpOnly session cookie, bearer tokens for scripts
 - **Books:** [Open Library](https://openlibrary.org) search + work metadata
 - **AI agents:** a stdio **MCP server** exposing the same operations as tools
 
@@ -34,21 +34,19 @@ Runs on **Cloudflare Workers** + **D1** + **Pages**.
 ```
 bookrecs/
 ├─ src/
-│  ├─ api.ts       # HTTP routes (Workers/D1 compatible)
-│  ├─ core.ts      # domain logic (books, ranked reads, friends)
-│  ├─ db.ts        # D1 database helpers
-│  ├─ auth.ts      # password hashing + sessions (Web Crypto)
-│  ├─ ratelimit.ts # D1-backed rate limiting
-│  ├─ twofa.ts     # 2FA TOTP (Web Crypto)
-│  ├─ mcp.ts       # MCP (stdio JSON-RPC) server for AI agents
-│  ├─ ol.ts        # Open Library client
-│  └─ encryption.ts# session token encryption
-├─ functions/      # Cloudflare Pages Functions (API entry point)
-├─ web/            # Vite + React frontend
-├─ scripts/
-│  ├─ mcp.sh       # cwd-independent MCP launcher
-│  └─ backfill-synopses.ts # fetch synopses for existing books
-└─ migrations/     # D1 database migrations
+│  ├─ api.ts        # HTTP routes (Workers/D1 compatible)
+│  ├─ core/         # domain logic: users, books, lists, friends, clubs, notifications
+│  ├─ db.ts         # D1 query helpers
+│  ├─ auth.ts       # password hashing + sessions (Web Crypto)
+│  ├─ ratelimit.ts  # D1-backed login rate limiting
+│  ├─ ol.ts         # Open Library client
+│  ├─ mcp.ts        # MCP (stdio JSON-RPC) server, a client of the HTTP API
+│  └─ test/         # in-memory D1 for tests (bun test)
+├─ functions/       # Cloudflare Pages Functions (API entry point)
+├─ web/             # Vite + React frontend
+├─ scripts/         # MCP launcher, preview seeding, production migration runner
+├─ lint/            # project-specific lint rules
+└─ migrations/      # D1 database migrations
 ```
 
 ## Quick start (development)
@@ -86,9 +84,10 @@ bun run deploy       # deploys worker + pages
 
 ## Talking to it from AI agents (MCP)
 
-The app ships an MCP server over stdio. It operates on **one user's account**,
-chosen at launch with `BOOKRECS_USER` (username or email). That user must exist
-(sign up via the web UI first).
+The app ships an MCP server over stdio. It is a client of the HTTP API and acts
+as **one user** through an API token: sign in, open **My Account**, and generate
+one. Set it as `BOOKRECS_TOKEN`, and point `BOOKRECS_URL` at the instance
+(default `http://localhost:8788`).
 
 Register it with any MCP client (Claude Desktop, Claude Code, etc.):
 
@@ -97,7 +96,7 @@ Register it with any MCP client (Claude Desktop, Claude Code, etc.):
   "mcpServers": {
     "bookrecs": {
       "command": "/path/to/bookrecs/scripts/mcp.sh",
-      "env": { "BOOKRECS_USER": "alice" }
+      "env": { "BOOKRECS_TOKEN": "<token>", "BOOKRECS_URL": "https://bookrecs.dev" }
     }
   }
 }
@@ -106,13 +105,13 @@ Register it with any MCP client (Claude Desktop, Claude Code, etc.):
 Or with Claude Code:
 
 ```bash
-claude mcp add bookrecs -e BOOKRECS_USER=alice -- /path/to/bookrecs/scripts/mcp.sh
+claude mcp add bookrecs -e BOOKRECS_TOKEN=<token> -e BOOKRECS_URL=https://bookrecs.dev -- /path/to/bookrecs/scripts/mcp.sh
 ```
 
 Or run it directly (from anywhere — paths are anchored to the repo):
 
 ```bash
-BOOKRECS_USER=alice bun run src/mcp.ts
+BOOKRECS_TOKEN=<token> bun run src/mcp.ts
 ```
 
 ### MCP tools
@@ -123,10 +122,10 @@ BOOKRECS_USER=alice bun run src/mcp.ts
 | `add_book`                                         | Add a book to your list (optional rank + review)                                               |
 | `add_manual_book`                                  | Add a book that isn't in Open Library, by title/author                                         |
 | `my_books`                                         | Your ranked list with reviews                                                                  |
-| `remove_book`                                      | Remove a book by `ol_key`                                                                      |
+| `remove_book`                                      | Remove a book by `book_id`                                                                     |
 | `set_review`                                       | Set/update a review                                                                            |
 | `set_rank`                                         | Move one book to a new rank                                                                    |
-| `reorder_books`                                    | Reorder the whole list (full ordered array)                                                    |
+| `reorder_books`                                    | Reorder the list (ordered `book_id`s; others keep their order after them)                      |
 | `search_users`                                     | Find users by username or email                                                                |
 | `send_friend_request`                              | Add a friend by username/email                                                                 |
 | `friend_requests`                                  | List pending incoming + outgoing requests                                                      |
@@ -138,9 +137,8 @@ BOOKRECS_USER=alice bun run src/mcp.ts
 | `add_to_wishlist_manual`                           | Add a not-in-Open-Library book to your wishlist                                                |
 | `remove_from_wishlist`                             | Remove a wishlist item by `book_id`                                                            |
 | `reorder_wishlist`                                 | Reorder your wishlist (full ordered `book_id` array)                                           |
-| `set_wish_rank`                                    | Move one wishlist book to a new rank                                                           |
 | `set_owned`                                        | Mark a wishlist item owned / not owned                                                         |
-| `set_public`                                       | Set a book public/private (`list` = `read` or `wish`)                                          |
+| `set_public`                                       | Set a book public/private (`list` = `read` or `wishlist`)                                      |
 | `friend_wishlist`                                  | A friend's public wishlist items                                                               |
 | `move_to_read`                                     | Move a wishlist item into your read list (optional `review`, `rank`)                           |
 | `my_reading`                                       | The books you're currently reading                                                             |
@@ -157,13 +155,15 @@ Send it a line of JSON-RPC over stdio to try it manually:
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"my_books","arguments":{}}}' \
-  | BOOKRECS_USER=alice bun run src/mcp.ts
+  | BOOKRECS_TOKEN=<token> bun run src/mcp.ts
 ```
 
 ## HTTP API (for scripts / non-MCP agents)
 
 All `POST`/`PATCH` bodies are JSON; auth is a session cookie (or `Authorization:
-Bearer <token>` where the token is minted via `POST /api/token`).
+Bearer <token>` where the token is minted via `POST /api/token`). Errors are
+`{error}` with 400 (invalid), 403 (not allowed) or 404 (not found). Club changes
+answer with the updated club detail (`{club}`).
 
 | Method | Path                                       | Description                                                                                       |
 | ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
@@ -196,7 +196,7 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 | POST   | `/api/me/reading/:id/back-to-wishlist`     | move reading → wishlist                                                                           |
 | DELETE | `/api/me/reading/:id`                      | remove                                                                                            |
 | GET    | `/api/friends/:username/reading`           | a friend's currently-reading (always visible)                                                     |
-| GET    | `/api/users/search?q=`                     | find users by username/email                                                                      |
+| GET    | `/api/users/discover?q=`                   | discoverable users, filtered by username/email when `q` is given                                  |
 | GET    | `/api/friends`                             | accepted friends                                                                                  |
 | POST   | `/api/friends/requests`                    | `{usernameOrEmail}` send request                                                                  |
 | GET    | `/api/friends/requests`                    | pending requests (in/out)                                                                         |
@@ -224,6 +224,8 @@ Bearer <token>` where the token is minted via `POST /api/token`).
 | POST   | `/api/clubs/:id/leave`                     | member: leave the club                                                                            |
 | POST   | `/api/clubs/:id/transfer`                  | owner: `{userId}` transfer ownership to a member and leave                                        |
 | DELETE | `/api/clubs/:id`                           | owner: delete the club                                                                            |
+| GET    | `/api/notifications`                       | grouped notifications and the unread count                                                        |
+| POST   | `/api/notifications/seen`                  | mark everything that doesn't need a response as read                                              |
 
 ## Notes
 

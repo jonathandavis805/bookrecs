@@ -1,4 +1,5 @@
 const BASE = "https://openlibrary.org";
+const WIKIDATA = "https://www.wikidata.org/wiki/Special:EntityData";
 const USER_AGENT = "bookrecs/1.0 (personal book tracking app)";
 
 const coverUrl = (id: number, size: "M" | "L" = "M") => `https://covers.openlibrary.org/b/id/${id}-${size}.jpg`;
@@ -20,25 +21,62 @@ export interface OLHit {
   year?: number;
 }
 
-async function getJson(url: string): Promise<any> {
+// The parts of Open Library and Wikidata responses this module reads.
+interface WorkJson {
+  title?: string;
+  authors?: { author?: { key?: string }; key?: string }[];
+  covers?: number[];
+  first_publish_date?: string;
+  description?: string | { value?: string };
+}
+interface AuthorJson {
+  name?: string;
+  personal_name?: string;
+  remote_ids?: { wikidata?: string };
+}
+interface EditionsJson {
+  entries?: { title?: string; languages?: { key?: string }[] }[];
+}
+interface SearchJson {
+  docs?: {
+    key: string;
+    title?: string;
+    author_name?: string[];
+    author_key?: string[];
+    cover_i?: number;
+    first_publish_year?: number;
+  }[];
+}
+interface WikidataJson {
+  entities?: Record<string, { labels?: Record<string, { value?: string }> }>;
+}
+
+async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
   if (!res.ok) throw new Error(`Open Library responded ${res.status}`);
-  return res.json();
+  return (await res.json()) as T;
 }
 
-function yearFrom(dateStr?: string): number | undefined {
-  if (!dateStr) return undefined;
-  const m = dateStr.match(/(\d{4})/);
+const yearFrom = (date?: string) => {
+  const m = date?.match(/(\d{4})/);
   return m ? Number(m[1]) : undefined;
-}
-
-// ---------- English author names ----------
+};
 
 // Non-Latin scripts (Cyrillic, Greek, CJK, Arabic, Indic, Hangul, ...).
-const NON_LATIN = /[\u0370-\u03FF\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]/;
+const NON_LATIN = /[Ͱ-ϿЀ-ӿ؀-ۿऀ-ॿ぀-ヿ㐀-鿿가-힯]/;
 
 export function isLatin(s: string): boolean {
   return !NON_LATIN.test(s);
+}
+
+// "The Brothers Karamazov", "the brothers karamazov" and "Brothers Karamazov"
+// are the same title to a reader.
+export function normalizeTitle(t: string): string {
+  return t
+    .toLowerCase()
+    .replace(/^(the|a|an)\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // "Surname, Given Names" -> "Given Names Surname"
@@ -47,57 +85,45 @@ function reverseName(s: string): string {
     .split(",")
     .map((p) => p.trim())
     .filter(Boolean);
-  if (parts.length === 2) return `${parts[1]} ${parts[0]}`;
-  return s;
+  return parts.length === 2 ? `${parts[1]} ${parts[0]}` : s;
 }
 
-const WIKIDATA = "https://www.wikidata.org/wiki/Special:EntityData";
+// ---------- English author names ----------
+
 const authorNameCache = new Map<string, string>();
 
 // Resolve an Open Library author key (/authors/OL123A) to an English name.
 // Preferred source is the Wikidata English label; falls back to Open Library's
-// own fields (already in the Latin alphabet) when Wikidata is unavailable.
+// own fields when Wikidata is unavailable.
 async function englishAuthorName(key: string): Promise<string> {
   const cached = authorNameCache.get(key);
   if (cached !== undefined) return cached;
 
   let result = "";
   try {
-    const d = await getJson(`${BASE}${key}.json`);
-    const qid: unknown = d?.remote_ids?.wikidata;
-
-    if (typeof qid === "string" && qid) {
+    const author = await getJson<AuthorJson>(`${BASE}${key}.json`);
+    const qid = author.remote_ids?.wikidata;
+    if (qid) {
       try {
-        const wd = await getJson(`${WIKIDATA}/${encodeURIComponent(qid)}.json`);
-        const labels: Record<string, any> = wd?.entities?.[qid]?.labels ?? {};
-        const en = typeof labels.en?.value === "string" ? labels.en.value : "";
-        if (en) {
-          result = en;
-        } else {
-          for (const v of Object.values(labels)) {
-            const val = (v as any)?.value;
-            if (typeof val === "string" && isLatin(val)) {
-              result = val;
-              break;
-            }
-          }
-        }
+        const wd = await getJson<WikidataJson>(`${WIKIDATA}/${encodeURIComponent(qid)}.json`);
+        const labels = wd.entities?.[qid]?.labels ?? {};
+        result =
+          (labels.en?.value ||
+            Object.values(labels)
+              .map((l) => l.value ?? "")
+              .find(isLatin)) ??
+          "";
       } catch {
         // fall through to Open Library fields below
       }
     }
-
     if (!result) {
-      const name: string = d?.name ?? "";
-      const personal: string = d?.personal_name ?? "";
-      if (personal && isLatin(personal)) result = reverseName(personal);
-      else if (name && isLatin(name)) result = name;
-      else if (name) result = name;
+      const { name = "", personal_name: personal = "" } = author;
+      result = personal && isLatin(personal) ? reverseName(personal) : name;
     }
   } catch {
     // could not resolve; leave empty
   }
-
   authorNameCache.set(key, result);
   return result;
 }
@@ -114,9 +140,7 @@ const englishTitleCache = new Map<string, string>();
 // "The Brothers Karamazov" over the equally-common "The brothers Karamazov".
 function titleCaseScore(s: string): number {
   const words = s.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return 0;
-  const capped = words.filter((w) => /^[A-Z]/.test(w)).length;
-  return capped / words.length;
+  return words.length ? words.filter((w) => /^[A-Z]/.test(w)).length / words.length : 0;
 }
 
 async function englishTitle(key: string): Promise<string> {
@@ -125,156 +149,105 @@ async function englishTitle(key: string): Promise<string> {
 
   let result = "";
   try {
-    const d = await getJson(`${BASE}${key}/editions.json?limit=500`);
-    const entries: any[] = Array.isArray(d?.entries) ? d.entries : [];
-    let best: { title: string; n: number } | null = null;
+    const { entries = [] } = await getJson<EditionsJson>(`${BASE}${key}/editions.json?limit=500`);
     const counts = new Map<string, { title: string; n: number }>();
-
     for (const e of entries) {
-      const title: unknown = e?.title;
-      if (typeof title !== "string" || !title.trim() || !isLatin(title)) continue;
-      const langs: any[] = Array.isArray(e?.languages) ? e.languages : [];
-      if (!langs.some((l) => typeof l?.key === "string" && l.key.endsWith("/eng"))) continue;
-      // "The Brothers Karamazov" / "the brothers karamazov" / "Brothers
-      // Karamazov" are all the same title to a reader — count them together.
-      const norm = title
-        .toLowerCase()
-        .replace(/^(the|a|an)\s+/, "")
-        .replace(/\s+/g, " ")
-        .trim();
+      const title = e.title?.trim();
+      if (!title || !isLatin(title)) continue;
+      if (!e.languages?.some((l) => l.key?.endsWith("/eng"))) continue;
+      const norm = normalizeTitle(title);
       if (!norm) continue;
       const cur = counts.get(norm) ?? { title, n: 0 };
       cur.n += 1;
       counts.set(norm, cur);
     }
-
-    for (const c of counts.values()) {
-      if (
-        !best ||
-        c.n > best.n ||
-        (c.n === best.n &&
-          (titleCaseScore(c.title) > titleCaseScore(best.title) ||
-            (titleCaseScore(c.title) === titleCaseScore(best.title) && c.title.length < best.title.length)))
-      ) {
-        best = c;
-      }
-    }
-    result = best?.title ?? "";
+    const better = (a: { title: string; n: number }, b: { title: string; n: number }) =>
+      a.n - b.n || titleCaseScore(a.title) - titleCaseScore(b.title) || b.title.length - a.title.length;
+    result = [...counts.values()].sort((a, b) => better(b, a))[0]?.title ?? "";
   } catch {
     // could not resolve; leave empty
   }
-
   englishTitleCache.set(key, result);
   return result;
 }
 
+// ---------- Search and works ----------
+
 export async function searchBooks(query: string): Promise<OLHit[]> {
-  const url =
+  const { docs = [] } = await getJson<SearchJson>(
     `${BASE}/search.json?q=${encodeURIComponent(query)}` +
-    `&fields=key,title,author_name,author_key,cover_i,first_publish_year&limit=20`;
-  const data = await getJson(url);
-  const docs: any[] = data?.docs ?? [];
-  const hits = docs.map((d) => ({
+      "&fields=key,title,author_name,author_key,cover_i,first_publish_year&limit=20",
+  );
+  const hits: OLHit[] = docs.map((d) => ({
     key: d.key,
     title: d.title ?? "Unknown title",
-    author: Array.isArray(d.author_name) ? d.author_name[0] : (d.author_name ?? ""),
+    author: d.author_name?.[0] ?? "",
     coverUrl: d.cover_i ? coverUrl(d.cover_i) : undefined,
-    year: d.first_publish_year ?? undefined,
+    year: d.first_publish_year,
   }));
 
   // Open Library's search index shows the author as named on the original
   // work ("Фёдор Михайлович Достоевский"), which reads as noise next to an
-  // English title. author_name and author_key are parallel arrays, so
-  // resolve non-Latin author names to their English form — same as when a
-  // book is added. Results usually share a handful of authors, and
-  // englishAuthorName caches, so this is a few requests at most.
-  const authorKeyOf = (d: any): string | undefined =>
-    Array.isArray(d.author_key) ? d.author_key[0] : typeof d.author_key === "string" ? d.author_key : undefined;
-  const foreignKeys = new Set<string>();
-  docs.forEach((d, i) => {
-    const key = authorKeyOf(d);
-    if (hits[i].author && !isLatin(hits[i].author) && key) foreignKeys.add(key);
-  });
-  if (foreignKeys.size > 0) {
-    await Promise.all(
-      [...foreignKeys].slice(0, 10).map(async (k) => {
-        const en = await englishAuthorName(`/authors/${k}`);
-        if (!en || !isLatin(en)) return;
-        docs.forEach((d, i) => {
-          if (authorKeyOf(d) === k) hits[i].author = en;
-        });
-      }),
-    );
-  }
+  // English title. Resolve non-Latin author names to their English form —
+  // same as when a book is added. Results usually share a handful of authors,
+  // and englishAuthorName caches, so this is a few requests at most.
+  const foreignKeys = new Set(
+    docs.flatMap((d, i) => (d.author_key?.[0] && !isLatin(hits[i].author) ? [d.author_key[0]] : [])),
+  );
+  await Promise.all(
+    [...foreignKeys].slice(0, 10).map(async (k) => {
+      const en = await englishAuthorName(`/authors/${k}`);
+      if (!en || !isLatin(en)) return;
+      docs.forEach((d, i) => {
+        if (d.author_key?.[0] === k) hits[i].author = en;
+      });
+    }),
+  );
+  return hits;
+}
 
-  let ranked: OLHit[] = hits;
-
-  // Open Library ranks by relevance across all languages, so a search for
-  // "Brother Karamazov" puts the Russian "Братья Карамазовы" first. For a
-  // Latin-script query, keep relevance order but put Latin-script titles
-  // ahead of foreign-script ones.
-  if (isLatin(query)) {
-    const latin = ranked.filter((h) => isLatin(h.title));
-    const foreign = ranked.filter((h) => !isLatin(h.title));
-    ranked = [...latin, ...foreign];
-  }
-
-  return ranked;
+function descriptionOf(work: WorkJson): string | undefined {
+  const desc = work.description;
+  return typeof desc === "string" ? desc : desc?.value || undefined;
 }
 
 export async function fetchWork(key: string): Promise<OLWork | null> {
   try {
-    const d = await getJson(`${BASE}${key}.json`);
-    if (!d?.title) return null;
+    const work = await getJson<WorkJson>(`${BASE}${key}.json`);
+    if (!work.title) return null;
 
     // A foreign-script title ("Братья Карамазовы") reads awkwardly next to
-    // the English author name we resolve below — display the work's English
+    // the English author name resolved below — use the work's English
     // edition title instead when one exists.
-    let title: string = d.title;
-    if (!isLatin(title)) {
-      const en = await englishTitle(key);
-      if (en) title = en;
-    }
+    const title = isLatin(work.title) ? work.title : (await englishTitle(key)) || work.title;
 
-    const authorKeys: string[] = (d.authors ?? [])
-      .map((a: any) => a?.author?.key ?? a?.key)
-      .filter((k: unknown): k is string => typeof k === "string");
+    const authorKeys = (work.authors ?? [])
+      .map((a) => a.author?.key ?? a.key)
+      .filter((k): k is string => typeof k === "string")
+      .slice(0, 3);
     const names: string[] = [];
-    for (let i = 0; i < Math.min(authorKeys.length, 3); i++) {
-      const n = await englishAuthorName(authorKeys[i]);
+    for (const k of authorKeys) {
+      const n = await englishAuthorName(k);
       if (n) names.push(n);
     }
-    const coverId = (d.covers ?? []).find((c: any) => typeof c === "number" && c > 0);
-
-    // Extract synopsis/description
-    let synopsis: string | undefined;
-    const desc = d.description;
-    if (desc) {
-      if (typeof desc === "string") {
-        synopsis = desc;
-      } else if (typeof desc === "object" && desc.value) {
-        synopsis = desc.value;
-      }
-    }
+    const coverId = work.covers?.find((c) => c > 0);
 
     return {
       key,
       title,
       author: names.join(", "),
-      coverUrl: typeof coverId === "number" ? coverUrl(coverId) : undefined,
-      year: yearFrom(d.first_publish_date),
-      synopsis,
+      coverUrl: coverId ? coverUrl(coverId) : undefined,
+      year: yearFrom(work.first_publish_date),
+      synopsis: descriptionOf(work),
     };
   } catch {
     return null;
   }
 }
 
-// Fetch synopsis for a book by its ol_key
 export async function fetchSynopsis(olKey: string): Promise<string | null> {
   try {
-    const work = await fetchWork(olKey);
-    return work?.synopsis ?? null;
+    return descriptionOf(await getJson<WorkJson>(`${BASE}${olKey}.json`)) ?? null;
   } catch {
     return null;
   }
