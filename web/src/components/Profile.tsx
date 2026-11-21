@@ -21,6 +21,7 @@ interface Props {
 }
 
 type Mine = "read" | "wish" | "reading" | null;
+type Format = "all" | "read" | "listened";
 
 export default function Profile({ username, me }: Props) {
   const isSelf = username.toLowerCase() === me.username.toLowerCase();
@@ -28,6 +29,7 @@ export default function Profile({ username, me }: Props) {
   const [books, setBooks] = useState<Book[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [category, setCategory] = useState<number | null>(null);
+  const [format, setFormat] = useState<Format>("all");
   const [wish, setWish] = useState<WishlistItem[] | null>(null);
   const [reading, setReading] = useState<ReadingItem[] | null>(null);
   const [nextUp, setNextUp] = useState<NextUpItem | null>(null);
@@ -45,6 +47,7 @@ export default function Profile({ username, me }: Props) {
     setBooks(null);
     setCategories([]);
     setCategory(null);
+    setFormat("all");
     setWish(null);
     setReading(null);
     setNextUp(null);
@@ -125,6 +128,18 @@ export default function Profile({ username, me }: Props) {
       await api(`/api/me/books/${bookId}/public`, {
         method: "POST",
         body: JSON.stringify({ public: next }),
+      });
+    } catch (e) {
+      setReadError(errorMessage(e));
+    }
+  }
+
+  async function setListened(bookId: number, next: boolean) {
+    setBooks((b) => (b ? b.map((x) => (x.book_id === bookId ? { ...x, listened: next ? 1 : 0 } : x)) : b));
+    try {
+      await api(`/api/me/books/${bookId}/listened`, {
+        method: "POST",
+        body: JSON.stringify({ listened: next }),
       });
     } catch (e) {
       setReadError(errorMessage(e));
@@ -229,21 +244,25 @@ export default function Profile({ username, me }: Props) {
     }
   }
 
-  // Within a category, newOrder is just its books: they swap among the overall
-  // slots they hold, mirroring what the server does.
+  // When filtered, newOrder is just the shown books: they swap among the overall
+  // slots they hold. The category route does the same server side; with a
+  // format filter the whole resulting order is sent instead.
   function handleReadReorder(newOrder: Book[]) {
-    const ordered = JSON.stringify({ ordered: newOrder.map((b) => b.book_id) });
-    if (category === null) {
+    const fail = (e: unknown) => setReadError(errorMessage(e));
+    if (category === null && format === "all") {
       setBooks(newOrder);
-      api("/api/me/books/reorder", { method: "POST", body: ordered }).catch((e) => setReadError(errorMessage(e)));
+      const ordered = JSON.stringify({ ordered: newOrder.map((b) => b.book_id) });
+      api("/api/me/books/reorder", { method: "POST", body: ordered }).catch(fail);
       return;
     }
+    if (!books) return;
     const members = new Set(newOrder.map((b) => b.book_id));
     let next = 0;
-    setBooks((all) => (all ? all.map((b) => (members.has(b.book_id) ? newOrder[next++] : b)) : all));
-    api(`/api/me/categories/${category}/reorder`, { method: "POST", body: ordered }).catch((e) =>
-      setReadError(errorMessage(e)),
-    );
+    const all = books.map((b) => (members.has(b.book_id) ? newOrder[next++] : b));
+    setBooks(all);
+    const [path, ids] =
+      format === "all" ? [`/api/me/categories/${category}/reorder`, newOrder] : ["/api/me/books/reorder", all];
+    api(path, { method: "POST", body: JSON.stringify({ ordered: ids.map((b) => b.book_id) }) }).catch(fail);
   }
 
   async function setBookCategories(bookId: number, ids: number[]) {
@@ -279,9 +298,14 @@ export default function Profile({ username, me }: Props) {
     },
   };
 
-  const shown = books && category !== null ? books.filter((b) => b.category_ids.includes(category)) : books;
-  // Only shown in a category view, where position in the category differs from overall.
-  const overall = (b: Book) => (category !== null && books ? books.indexOf(b) + 1 : undefined);
+  const shown =
+    books?.filter(
+      (b) =>
+        (category === null || b.category_ids.includes(category)) &&
+        (format === "all" || !!b.listened === (format === "listened")),
+    ) ?? null;
+  // Only shown when filtered, where position in the list differs from overall.
+  const overall = (b: Book) => ((category !== null || format !== "all") && books ? books.indexOf(b) + 1 : undefined);
 
   function handleWishReorder(newOrder: WishlistItem[]) {
     setWish(newOrder);
@@ -473,6 +497,20 @@ export default function Profile({ username, me }: Props) {
       {!readError && (
         <section className="card">
           <h2 className="section-title">Books read</h2>
+          {books?.some((b) => b.listened) && (
+            <div className="chip-picker format-filter">
+              {(["all", "read", "listened"] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`chip${format === f ? " picked" : ""}`}
+                  onClick={() => setFormat(f)}
+                >
+                  {f === "all" ? "Read and listened" : f === "read" ? "Read" : "Listened"}
+                </button>
+              ))}
+            </div>
+          )}
           {books && books.length > 0 && (
             <CategoryBar
               categories={categories}
@@ -490,7 +528,7 @@ export default function Profile({ username, me }: Props) {
                 const ids = books.find((b) => b.book_id === bookId)?.category_ids ?? [];
                 setBookCategories(bookId, [...ids, category]);
               }}
-              startOpen={shown.length === 0}
+              startOpen={!books.some((b) => b.category_ids.includes(category))}
             />
           )}
           {books === null || shown === null ? (
@@ -500,7 +538,9 @@ export default function Profile({ username, me }: Props) {
               {isSelf ? 'No books yet. Add some from the "Add Book" page.' : "No public books yet."}
             </div>
           ) : shown.length === 0 ? (
-            <div className="empty muted">No books in this category yet.</div>
+            <div className="empty muted">
+              {format === "all" ? "No books in this category yet." : "No books match this filter."}
+            </div>
           ) : isSelf ? (
             <Reorder.Group axis="y" values={shown} onReorder={handleReadReorder} className="book-list">
               {shown.map((b, i) => (
@@ -520,6 +560,7 @@ export default function Profile({ username, me }: Props) {
                   }}
                   onSaveReview={() => saveReview(b.book_id)}
                   onTogglePublic={(next) => toggleReadPublic(b.book_id, next)}
+                  onSetListened={(next) => setListened(b.book_id, next)}
                   onStartReading={() => startReading(b.book_id)}
                   onRemove={() => removeRead(b.book_id)}
                 />
@@ -536,6 +577,7 @@ export default function Profile({ username, me }: Props) {
                       <a href={`#/book/${b.book_id}`} className="book-title-link">
                         {b.title}
                       </a>
+                      {b.listened ? <span className="badge">Listened</span> : null}
                     </div>
                     <Byline author={b.author} year={b.first_publish_year} />
                     <OverallRank rank={overall(b)} />
@@ -622,6 +664,7 @@ function ReadItem({
   reviewOnChange,
   onSaveReview,
   onTogglePublic,
+  onSetListened,
   onStartReading,
   onRemove,
 }: {
@@ -636,6 +679,7 @@ function ReadItem({
   reviewOnChange: (v: string) => void;
   onSaveReview: () => void;
   onTogglePublic: (next: boolean) => void;
+  onSetListened: (next: boolean) => void;
   onStartReading: () => void;
   onRemove: () => void;
 }) {
@@ -699,6 +743,19 @@ function ReadItem({
         <div className="public-col">
           <Switch checked={!!book.public} onChange={onTogglePublic} title="Visible to friends" />
           <span className="small-label">{book.public ? "Public" : "Private"}</span>
+        </div>
+        <div className="segmented compact">
+          {[false, true].map((listened) => (
+            <button
+              key={String(listened)}
+              type="button"
+              className={!!book.listened === listened ? "active" : ""}
+              aria-pressed={!!book.listened === listened}
+              onClick={() => onSetListened(listened)}
+            >
+              {listened ? "Listened" : "Read"}
+            </button>
+          ))}
         </div>
         <button
           type="button"

@@ -9,6 +9,7 @@ export interface ReadRow extends BookRow {
   category_ids: number[];
   review: string | null;
   public: number;
+  listened: number;
   created_at: number;
   updated_at: number;
 }
@@ -135,7 +136,7 @@ export async function setVisibility(
 export async function listReads(db: D1Database, userId: number, publicOnly = false): Promise<ReadRow[]> {
   const rows = await queryAll<Omit<ReadRow, "category_ids"> & { category_ids: string }>(
     db,
-    `SELECT r.book_id, r.rank, r.review, r.public, r.created_at, r.updated_at, ${BOOK_COLUMNS},
+    `SELECT r.book_id, r.rank, r.review, r.public, r.listened, r.created_at, r.updated_at, ${BOOK_COLUMNS},
        (SELECT json_group_array(cb.category_id) FROM category_books cb
         WHERE cb.user_id = r.user_id AND cb.book_id = r.book_id) AS category_ids
      FROM reads r JOIN books b ON b.id = r.book_id
@@ -187,6 +188,17 @@ export async function setReview(db: D1Database, userId: number, bookId: number, 
     "UPDATE reads SET review = ?, updated_at = ? WHERE user_id = ? AND book_id = ?",
     review,
     now(),
+    userId,
+    bookId,
+  );
+  return r.meta.changes ? { ok: true } : notFound("Book not on your list");
+}
+
+export async function setListened(db: D1Database, userId: number, bookId: number, listened: boolean): Promise<Result> {
+  const r = await execute(
+    db,
+    "UPDATE reads SET listened = ? WHERE user_id = ? AND book_id = ?",
+    listened ? 1 : 0,
     userId,
     bookId,
   );

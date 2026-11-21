@@ -47,7 +47,7 @@ const tools: Tool[] = [
   {
     name: "my_books",
     description:
-      "The user's ranked list of books read (rank 1 = top), with reviews, category_ids and the user's categories.",
+      "The user's ranked list of books read (rank 1 = top), with reviews, listened (audiobook) flags, category_ids and the user's categories.",
     request: () => ["GET", "/api/me/books"],
   },
   {
@@ -153,6 +153,13 @@ const tools: Tool[] = [
       `/api/me/${a.list === "wishlist" ? "wishlist" : "books"}/${seg(a.book_id)}/public`,
       { public: a.public },
     ],
+  },
+  {
+    name: "set_listened",
+    description: "Mark a read-list book as listened to (audiobook) or read.",
+    properties: { book_id: bookId, listened: bool("Listened to rather than read") },
+    required: ["book_id", "listened"],
+    request: (a) => ["POST", `/api/me/books/${seg(a.book_id)}/listened`, { listened: a.listened }],
   },
   {
     name: "my_wishlist",
