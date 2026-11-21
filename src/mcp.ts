@@ -217,7 +217,7 @@ const tools: Tool[] = [
   },
   {
     name: "my_reading",
-    description: "Books the user is currently reading.",
+    description: "Books the user is currently reading, with a listening (audiobook) flag.",
     request: () => ["GET", "/api/me/reading"],
   },
   {
@@ -234,8 +234,15 @@ const tools: Tool[] = [
     request: (a) => ["POST", "/api/me/reading/manual", manualBody(a)],
   },
   {
+    name: "set_listening",
+    description: "Mark a currently-reading book as being listened to (audiobook) or read.",
+    properties: { book_id: bookId, listening: bool("Listening rather than reading") },
+    required: ["book_id", "listening"],
+    request: (a) => ["POST", `/api/me/reading/${seg(a.book_id)}/listening`, { listening: a.listening }],
+  },
+  {
     name: "finish_reading",
-    description: "Finish a book: it moves to the read list.",
+    description: "Finish a book: it moves to the read list, marked listened if it was being listened to.",
     properties: { book_id: bookId, review: str(), rank, category_ids: categoryIds },
     required: ["book_id"],
     request: (a) => [

@@ -871,7 +871,8 @@ textarea:focus {
   resize: vertical;
 }
 
-.review-toggle {
+.review-toggle,
+.review-row {
   display: none;
 }
 
@@ -952,7 +953,7 @@ textarea:focus {
 }
 
 .review-row {
-  padding: 16px;
+  padding-top: 8px;
 }
 
 .review-row .title {
@@ -1608,10 +1609,62 @@ textarea:focus {
     margin-right: auto;
   }
 
+  /* Rank, Public and remove on top; the book's details get the full width below. */
+  .read-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+  }
+
+  .read-row .drag-handle {
+    grid-row: 1 / span 2;
+    grid-column: 1;
+  }
+
+  .read-row .rank {
+    grid-row: 1;
+    grid-column: 2;
+    padding-top: 0;
+  }
+
+  .read-row .info {
+    grid-row: 2;
+    grid-column: 2 / -1;
+  }
+
+  .read-row .actions-col {
+    display: contents;
+  }
+
+  .read-row .public-col {
+    grid-row: 1;
+    grid-column: 3;
+    margin-right: 0;
+  }
+
+  .read-row .actions-col .icon-btn {
+    grid-row: 1;
+    grid-column: 4;
+  }
+
+  .read-row .actions-col .segmented,
+  .read-row .actions-col .btn-sm {
+    display: none;
+  }
+
+  .review-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
   .review-toggle {
     display: inline-flex;
-    margin-top: 8px;
+    flex-shrink: 0;
     padding: 5px 10px;
+    white-space: nowrap;
     border-color: var(--border);
     color: var(--muted);
     font-size: var(--font-sm);
