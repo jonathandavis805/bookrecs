@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage, type SearchHit } from "../api";
+import { useBookSearch } from "../useBookSearch";
 import { Byline, Cover } from "./ui/Book";
 import { IconBook, IconCheck, IconHeart } from "./ui/icons";
 import { Switch } from "./ui/Switch";
@@ -45,35 +46,8 @@ interface PaneProps {
 
 function SearchPane({ atLimit, onBookAdded }: Omit<PaneProps, "bookLimit">) {
   const [q, setQ] = useState("");
-  const [hits, setHits] = useState<SearchHit[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [error, setError] = useState("");
+  const { hits, searched, searching, error } = useBookSearch(q);
   const [status, setStatus] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!q.trim()) {
-      setHits([]);
-      setSearched(false);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      setError("");
-      try {
-        const d = await api<{ results: SearchHit[] }>(`/api/books/search?q=${encodeURIComponent(q.trim())}`);
-        setHits(d.results);
-        setSearched(true);
-      } catch (err) {
-        setError(errorMessage(err));
-      } finally {
-        setSearching(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [q]);
 
   async function add(hit: SearchHit, target: "read" | "reading" | "wish") {
     if (target === "read" && atLimit) return;
@@ -115,79 +89,81 @@ function SearchPane({ atLimit, onBookAdded }: Omit<PaneProps, "bookLimit">) {
 
       {error && <div className="error">{error}</div>}
 
-      <ul className="result-list">
-        {hits.map((h) => {
-          const readS = status[`${h.key}:read`];
-          const read2 = status[`${h.key}:reading`];
-          const wishS = status[`${h.key}:wish`];
-          return (
-            <li key={h.key} className="book-row">
-              <Cover url={h.coverUrl} />
-              <div className="info">
-                <div className="title">
-                  {h.title}
-                  {h.added && (
-                    <span className="added-mark" title="Added by someone">
-                      <IconCheck size={14} />
-                    </span>
+      {hits.length > 0 && (
+        <ul className="result-list">
+          {hits.map((h) => {
+            const readS = status[`${h.key}:read`];
+            const read2 = status[`${h.key}:reading`];
+            const wishS = status[`${h.key}:wish`];
+            return (
+              <li key={h.key} className="book-row">
+                <Cover url={h.coverUrl} />
+                <div className="info">
+                  <div className="title">
+                    {h.title}
+                    {h.added && (
+                      <span className="added-mark" title="Added by someone">
+                        <IconCheck size={14} />
+                      </span>
+                    )}
+                  </div>
+                  <Byline author={h.author} year={h.year} />
+                </div>
+                <div className="actions">
+                  {readS === "Added" ? (
+                    <span className="success-text">Added</span>
+                  ) : readS && readS !== "Adding…" ? (
+                    <span className="error-text">{readS}</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => add(h, "read")}
+                      disabled={readS === "Adding…" || atLimit}
+                      title={atLimit ? "Book limit reached" : ""}
+                    >
+                      {readS === "Adding…" ? "…" : atLimit ? "Limit reached" : "My Books"}
+                    </button>
+                  )}
+                  {read2 === "Reading" ? (
+                    <span className="success-text">Reading</span>
+                  ) : read2 && read2 !== "Adding…" ? (
+                    <span className="error-text">{read2}</span>
+                  ) : (
+                    <button type="button" onClick={() => add(h, "reading")} disabled={read2 === "Adding…"}>
+                      {read2 === "Adding…" ? (
+                        "…"
+                      ) : (
+                        <>
+                          <IconBook /> Reading
+                        </>
+                      )}
+                    </button>
+                  )}
+                  {wishS === "Saved" ? (
+                    <span className="success-text">Saved</span>
+                  ) : wishS && wishS !== "Adding…" ? (
+                    <span className="error-text">{wishS}</span>
+                  ) : (
+                    <button type="button" onClick={() => add(h, "wish")} disabled={wishS === "Adding…"}>
+                      {wishS === "Adding…" ? (
+                        "…"
+                      ) : (
+                        <>
+                          <IconHeart /> Wishlist
+                        </>
+                      )}
+                    </button>
                   )}
                 </div>
-                <Byline author={h.author} year={h.year} />
-              </div>
-              <div className="actions">
-                {readS === "Added" ? (
-                  <span className="success-text">Added</span>
-                ) : readS && readS !== "Adding…" ? (
-                  <span className="error-text">{readS}</span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => add(h, "read")}
-                    disabled={readS === "Adding…" || atLimit}
-                    title={atLimit ? "Book limit reached" : ""}
-                  >
-                    {readS === "Adding…" ? "…" : atLimit ? "Limit reached" : "My Books"}
-                  </button>
-                )}
-                {read2 === "Reading" ? (
-                  <span className="success-text">Reading</span>
-                ) : read2 && read2 !== "Adding…" ? (
-                  <span className="error-text">{read2}</span>
-                ) : (
-                  <button type="button" onClick={() => add(h, "reading")} disabled={read2 === "Adding…"}>
-                    {read2 === "Adding…" ? (
-                      "…"
-                    ) : (
-                      <>
-                        <IconBook /> Reading
-                      </>
-                    )}
-                  </button>
-                )}
-                {wishS === "Saved" ? (
-                  <span className="success-text">Saved</span>
-                ) : wishS && wishS !== "Adding…" ? (
-                  <span className="error-text">{wishS}</span>
-                ) : (
-                  <button type="button" onClick={() => add(h, "wish")} disabled={wishS === "Adding…"}>
-                    {wishS === "Adding…" ? (
-                      "…"
-                    ) : (
-                      <>
-                        <IconHeart /> Wishlist
-                      </>
-                    )}
-                  </button>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
       {searched && hits.length === 0 && !error && (
         <div className="empty">
-          <p>No matches for "{q}".</p>
+          <p>No matches for "{searched}".</p>
           <p className="muted">Add it by hand using the form below.</p>
         </div>
       )}

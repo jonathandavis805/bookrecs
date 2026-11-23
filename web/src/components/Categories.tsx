@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { type Category, errorMessage } from "../api";
 
 interface BarProps {
@@ -18,6 +18,24 @@ export function CategoryBar({ categories, selected, onSelect, edit }: BarProps) 
   const [name, setName] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
+  const root = useRef<HTMLDivElement>(null);
+  const clickedAt = useRef<number | null>(null);
+
+  // Another list's bar can change the selection: close anything open about the old one.
+  const [lastSelected, setLastSelected] = useState(selected);
+  if (selected !== lastSelected) {
+    setLastSelected(selected);
+    reset();
+  }
+
+  // Filtering also resizes the lists above this bar; keep it under the pointer.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once the new filter has laid out
+  useLayoutEffect(() => {
+    if (clickedAt.current !== null && root.current) {
+      window.scrollBy(0, root.current.getBoundingClientRect().top - clickedAt.current);
+    }
+    clickedAt.current = null;
+  }, [selected]);
 
   if (!edit && categories.length === 0) return null;
   const current = categories.find((c) => c.id === selected);
@@ -30,6 +48,7 @@ export function CategoryBar({ categories, selected, onSelect, edit }: BarProps) 
 
   function select(id: number | null) {
     reset();
+    if (id !== selected) clickedAt.current = root.current?.getBoundingClientRect().top ?? null;
     onSelect(id);
   }
 
@@ -56,7 +75,7 @@ export function CategoryBar({ categories, selected, onSelect, edit }: BarProps) 
   }
 
   return (
-    <div className="category-bar">
+    <div className="category-bar" ref={root}>
       <div className="chip-picker">
         <button type="button" className={`chip${selected === null ? " picked" : ""}`} onClick={() => select(null)}>
           All

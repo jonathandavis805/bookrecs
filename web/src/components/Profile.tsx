@@ -28,7 +28,9 @@ export default function Profile({ username, me }: Props) {
 
   const [books, setBooks] = useState<Book[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  // One filter for books read and the wishlist, and which list's bar last set it.
   const [category, setCategory] = useState<number | null>(null);
+  const [filterFrom, setFilterFrom] = useState<"read" | "wish">("read");
   const [format, setFormat] = useState<Format>("all");
   const [wish, setWish] = useState<WishlistItem[] | null>(null);
   const [reading, setReading] = useState<ReadingItem[] | null>(null);
@@ -346,19 +348,39 @@ export default function Profile({ username, me }: Props) {
     }).catch((e) => setReadError(errorMessage(e)));
   }
 
-  function categoryAdder(list: { book_id: number; title: string; category_ids: number[] }[], startOpen: boolean) {
-    if (!isSelf || category === null) return null;
+  function categoryFilter(
+    from: "read" | "wish",
+    list: { book_id: number; title: string; category_ids: number[] }[] | null,
+  ) {
+    if (!list?.length) return null;
+    const create = async (name: string) => {
+      setFilterFrom(from);
+      await categoryEdit.create(name);
+    };
     return (
-      <CategoryAdder
-        key={category}
-        name={categoryName}
-        books={list.filter((b) => !b.category_ids.includes(category))}
-        onAdd={(bookId) => {
-          const ids = list.find((b) => b.book_id === bookId)?.category_ids ?? [];
-          setBookCategories(bookId, [...ids, category]);
-        }}
-        startOpen={startOpen}
-      />
+      <>
+        <CategoryBar
+          categories={categories}
+          selected={category}
+          onSelect={(id) => {
+            setFilterFrom(from);
+            setCategory(id);
+          }}
+          edit={isSelf ? { ...categoryEdit, create } : undefined}
+        />
+        {isSelf && category !== null && (
+          <CategoryAdder
+            key={category}
+            name={categoryName}
+            books={list.filter((b) => !b.category_ids.includes(category))}
+            onAdd={(bookId) => {
+              const ids = list.find((b) => b.book_id === bookId)?.category_ids ?? [];
+              setBookCategories(bookId, [...ids, category]);
+            }}
+            startOpen={categoryEmpty && filterFrom === from}
+          />
+        )}
+      </>
     );
   }
 
@@ -556,18 +578,6 @@ export default function Profile({ username, me }: Props) {
         </section>
       )}
 
-      {!readError && (isSelf ? !!(books?.length || wish?.length) : categories.length > 0) && (
-        <section className="card">
-          <h2 className="section-title">Categories</h2>
-          <CategoryBar
-            categories={categories}
-            selected={category}
-            onSelect={setCategory}
-            edit={isSelf ? categoryEdit : undefined}
-          />
-        </section>
-      )}
-
       {!readError && (
         <section className="card">
           <h2 className="section-title">Books read</h2>
@@ -585,7 +595,7 @@ export default function Profile({ username, me }: Props) {
               ))}
             </div>
           )}
-          {books && categoryAdder(books, categoryEmpty)}
+          {categoryFilter("read", books)}
           {books === null || shown === null ? (
             <div className="loading">Loading…</div>
           ) : books.length === 0 ? (
@@ -650,7 +660,7 @@ export default function Profile({ username, me }: Props) {
       {!readError && (
         <section className="card">
           <h2 className="section-title">Wishlist</h2>
-          {wish && categoryAdder(wish, categoryEmpty && books?.length === 0)}
+          {categoryFilter("wish", wish)}
           {wish === null || shownWish === null ? (
             <div className="loading">Loading…</div>
           ) : wish.length === 0 ? (

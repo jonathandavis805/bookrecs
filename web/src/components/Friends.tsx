@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage, type ReadingItem } from "../api";
 import { Cover } from "./ui/Book";
 
@@ -32,7 +32,6 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -60,16 +59,17 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
       setSearching(false);
       return;
     }
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => {
-      setSearching(true);
+    let superseded = false;
+    setSearching(true);
+    const timer = setTimeout(() => {
       api<{ users: SearchableUser[] }>(`/api/users/discover?q=${encodeURIComponent(q)}`)
-        .then((d) => setSearchResults(d.users))
-        .catch(() => setSearchResults([]))
-        .finally(() => setSearching(false));
+        .then((d) => !superseded && setSearchResults(d.users))
+        .catch(() => !superseded && setSearchResults([]))
+        .finally(() => !superseded && setSearching(false));
     }, 250);
     return () => {
-      if (searchTimer.current) clearTimeout(searchTimer.current);
+      superseded = true;
+      clearTimeout(timer);
     };
   }, [addInput]);
 
