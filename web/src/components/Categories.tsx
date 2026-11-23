@@ -84,7 +84,7 @@ export function CategoryBar({ categories, selected, onSelect, edit }: BarProps) 
           </button>
           {confirmDelete ? (
             <>
-              <span className="small-label">Delete “{current.name}”? Its books stay on your list.</span>
+              <span className="small-label">Delete “{current.name}”? Its books stay on your lists.</span>
               <button type="button" className="link danger" onClick={() => run(() => edit.remove(current.id))}>
                 Delete
               </button>
@@ -123,7 +123,7 @@ export function CategoryBar({ categories, selected, onSelect, edit }: BarProps) 
 
 interface AdderProps {
   name: string;
-  // The owner's books not yet in the category, in overall rank order.
+  // One of the owner's lists, minus books already in the category, in overall rank order.
   books: { book_id: number; title: string }[];
   onAdd: (bookId: number) => void;
   // Open straight away when the category is empty, e.g. just created.

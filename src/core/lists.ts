@@ -19,11 +19,13 @@ export interface WishlistRow extends BookRow {
   owned: number;
   public: number;
   rank: number;
+  category_ids: number[];
   created_at: number;
 }
 
 export interface ReadingRow extends BookRow {
   book_id: number;
+  category_ids: number[];
   listening: number;
   created_at: number;
 }
@@ -46,6 +48,35 @@ interface WishlistState {
 
 async function onList(db: D1Database, list: List, userId: number, bookId: number): Promise<boolean> {
   return !!(await queryOne(db, `SELECT 1 FROM ${list} WHERE user_id = ? AND book_id = ?`, userId, bookId));
+}
+
+// ---------- Categories on list rows ----------
+
+// The categories of a list row aliased l, for queryWithCategories.
+const CATEGORY_IDS = `(SELECT json_group_array(cb.category_id) FROM category_books cb
+  WHERE cb.user_id = l.user_id AND cb.book_id = l.book_id) AS category_ids`;
+
+async function queryWithCategories<T extends { category_ids: number[] }>(
+  db: D1Database,
+  sql: string,
+  ...params: unknown[]
+): Promise<T[]> {
+  const rows = await queryAll<Omit<T, "category_ids"> & { category_ids: string }>(db, sql, ...params);
+  return rows.map((r) => ({ ...r, category_ids: JSON.parse(r.category_ids) }) as unknown as T);
+}
+
+// Categories follow a book between lists, so they go once it is on none of them.
+// Moves must add to the new list before removing from the old one.
+async function pruneCategories(db: D1Database, userId: number, bookId: number): Promise<void> {
+  await execute(
+    db,
+    `DELETE FROM category_books WHERE user_id = ?1 AND book_id = ?2
+       AND NOT EXISTS (SELECT 1 FROM reads WHERE user_id = ?1 AND book_id = ?2)
+       AND NOT EXISTS (SELECT 1 FROM wishlist WHERE user_id = ?1 AND book_id = ?2)
+       AND NOT EXISTS (SELECT 1 FROM reading WHERE user_id = ?1 AND book_id = ?2)`,
+    userId,
+    bookId,
+  );
 }
 
 // ---------- Ranked lists (reads and wishlist share ordering rules) ----------
@@ -112,6 +143,7 @@ async function insertRanked(
 
 async function removeRanked(db: D1Database, list: RankedList, userId: number, bookId: number): Promise<void> {
   await execute(db, `DELETE FROM ${list} WHERE user_id = ? AND book_id = ?`, userId, bookId);
+  await pruneCategories(db, userId, bookId);
   await writeRanks(db, list, userId, await rankedIds(db, list, userId));
 }
 
@@ -135,16 +167,13 @@ export async function setVisibility(
 // ---------- Reads ----------
 
 export async function listReads(db: D1Database, userId: number, publicOnly = false): Promise<ReadRow[]> {
-  const rows = await queryAll<Omit<ReadRow, "category_ids"> & { category_ids: string }>(
+  return await queryWithCategories<ReadRow>(
     db,
-    `SELECT r.book_id, r.rank, r.review, r.public, r.listened, r.created_at, r.updated_at, ${BOOK_COLUMNS},
-       (SELECT json_group_array(cb.category_id) FROM category_books cb
-        WHERE cb.user_id = r.user_id AND cb.book_id = r.book_id) AS category_ids
-     FROM reads r JOIN books b ON b.id = r.book_id
-     WHERE r.user_id = ? ${publicOnly ? "AND r.public = 1" : ""} ORDER BY r.rank ASC`,
+    `SELECT l.book_id, l.rank, l.review, l.public, l.listened, l.created_at, l.updated_at, ${BOOK_COLUMNS}, ${CATEGORY_IDS}
+     FROM reads l JOIN books b ON b.id = l.book_id
+     WHERE l.user_id = ? ${publicOnly ? "AND l.public = 1" : ""} ORDER BY l.rank ASC`,
     userId,
   );
-  return rows.map((r) => ({ ...r, category_ids: JSON.parse(r.category_ids) }));
 }
 
 interface ReadOptions {
@@ -215,11 +244,11 @@ export async function removeRead(db: D1Database, userId: number, bookId: number)
 // ---------- Wishlist ----------
 
 export async function listWishlist(db: D1Database, userId: number, publicOnly = false): Promise<WishlistRow[]> {
-  return await queryAll<WishlistRow>(
+  return await queryWithCategories<WishlistRow>(
     db,
-    `SELECT w.book_id, w.owned, w.public, w.rank, w.created_at, ${BOOK_COLUMNS}
-     FROM wishlist w JOIN books b ON b.id = w.book_id
-     WHERE w.user_id = ? ${publicOnly ? "AND w.public = 1" : ""} ORDER BY w.rank ASC`,
+    `SELECT l.book_id, l.owned, l.public, l.rank, l.created_at, ${BOOK_COLUMNS}, ${CATEGORY_IDS}
+     FROM wishlist l JOIN books b ON b.id = l.book_id
+     WHERE l.user_id = ? ${publicOnly ? "AND l.public = 1" : ""} ORDER BY l.rank ASC`,
     userId,
   );
 }
@@ -313,11 +342,11 @@ export async function getNextUp(db: D1Database, userId: number): Promise<NextUpR
 // ---------- Currently reading ----------
 
 export async function listReading(db: D1Database, userId: number): Promise<ReadingRow[]> {
-  return await queryAll<ReadingRow>(
+  return await queryWithCategories<ReadingRow>(
     db,
-    `SELECT r.book_id, r.listening, r.created_at, ${BOOK_COLUMNS}
-     FROM reading r JOIN books b ON b.id = r.book_id
-     WHERE r.user_id = ? ORDER BY r.created_at DESC, r.book_id DESC`,
+    `SELECT l.book_id, l.listening, l.created_at, ${BOOK_COLUMNS}, ${CATEGORY_IDS}
+     FROM reading l JOIN books b ON b.id = l.book_id
+     WHERE l.user_id = ? ORDER BY l.created_at DESC, l.book_id DESC`,
     userId,
   );
 }
@@ -339,6 +368,7 @@ async function insertReading(db: D1Database, userId: number, bookId: number, fro
 export async function addToReading(db: D1Database, userId: number, ref: BookRef): Promise<Result<{ book: BookRow }>> {
   const r = await resolveBook(db, ref);
   if (!r.ok) return r;
+  if (await onList(db, "wishlist", userId, r.book.id)) return await moveFromWishlistToReading(db, userId, r.book.id);
   const added = await insertReading(db, userId, r.book.id);
   return added.ok ? r : added;
 }
@@ -357,8 +387,11 @@ export async function moveFromWishlistToReading(
   if (!wish) return notFound("Book not on your wishlist");
   const r = await resolveBook(db, { bookId });
   if (!r.ok) return r;
-  const added = await insertReading(db, userId, bookId, wish);
-  if (!added.ok) return added;
+  // Starting a wishlist book used to leave it on both lists.
+  if (!(await onList(db, "reading", userId, bookId))) {
+    const added = await insertReading(db, userId, bookId, wish);
+    if (!added.ok) return added;
+  }
   await removeFromWishlist(db, userId, bookId);
   return r;
 }
@@ -393,13 +426,14 @@ async function restoreToWishlist(
 
 async function deleteReading(db: D1Database, userId: number, bookId: number): Promise<void> {
   await execute(db, "DELETE FROM reading WHERE user_id = ? AND book_id = ?", userId, bookId);
+  await pruneCategories(db, userId, bookId);
 }
 
 // Dropping a book that came from the wishlist returns it there.
 export async function removeFromReading(db: D1Database, userId: number, bookId: number): Promise<void> {
   const state = await readingState(db, userId, bookId);
-  await deleteReading(db, userId, bookId);
   if (state?.wishlist_rank != null) await restoreToWishlist(db, userId, bookId, state);
+  await deleteReading(db, userId, bookId);
 }
 
 export async function finishReading(

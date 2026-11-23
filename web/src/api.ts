@@ -50,6 +50,7 @@ export interface WishlistItem {
   owned: number;
   public: number;
   rank: number;
+  category_ids: number[];
   created_at: number;
   id: number;
   ol_key: string;
@@ -69,6 +70,7 @@ export interface NextUpItem extends WishlistItem {
 export interface ReadingItem {
   book_id: number;
   listening: number;
+  category_ids: number[];
   created_at: number;
   id: number;
   ol_key: string;
@@ -156,7 +158,7 @@ export interface ClubDetailData {
   nominations: ClubNomination[];
   myVote: number | null;
   myVetoUsed: boolean;
-  currentPick: ClubPick | null;
+  currentPick: (ClubPick & { isReading: boolean }) | null;
   pastPicks: ClubPick[];
 }
 

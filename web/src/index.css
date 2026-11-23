@@ -404,7 +404,6 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-bottom: 14px;
 }
 
 .category-actions,
@@ -1577,14 +1576,11 @@ textarea:focus {
   text-decoration: line-through;
 }
 
-.club-vote-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-right: 10px;
-  color: var(--muted);
-  font-size: var(--font-md);
-  font-weight: 600;
+.vote-btn.on,
+.vote-btn.on:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .club-myvote-note {

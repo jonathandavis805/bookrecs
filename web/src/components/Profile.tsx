@@ -277,8 +277,17 @@ export default function Profile({ username, me }: Props) {
     api(path, { method: "POST", body: JSON.stringify({ ordered: ids.map((b) => b.book_id) }) }).catch(fail);
   }
 
+  // Categories belong to the book, so a change shows on every list it's on.
+  function mapCategories(change: (bookId: number, ids: number[]) => number[]) {
+    const apply = <T extends { book_id: number; category_ids: number[] }>(list: T[] | null) =>
+      list ? list.map((x) => ({ ...x, category_ids: change(x.book_id, x.category_ids) })) : null;
+    setBooks(apply);
+    setWish(apply);
+    setReading(apply);
+  }
+
   async function setBookCategories(bookId: number, ids: number[]) {
-    setBooks((b) => (b ? b.map((x) => (x.book_id === bookId ? { ...x, category_ids: ids } : x)) : b));
+    mapCategories((id, current) => (id === bookId ? ids : current));
     try {
       await api(`/api/me/books/${bookId}/categories`, { method: "POST", body: JSON.stringify({ category_ids: ids }) });
     } catch (e) {
@@ -306,7 +315,7 @@ export default function Profile({ username, me }: Props) {
       const d = await api<{ categories: Category[] }>(`/api/me/categories/${id}`, { method: "DELETE" });
       setCategories(d.categories);
       setCategory(null);
-      setBooks((b) => (b ? b.map((x) => ({ ...x, category_ids: x.category_ids.filter((c) => c !== id) })) : b));
+      mapCategories((_, ids) => ids.filter((c) => c !== id));
     },
   };
 
@@ -319,12 +328,38 @@ export default function Profile({ username, me }: Props) {
   // Only shown when filtered, where position in the list differs from overall.
   const overall = (b: Book) => ((category !== null || format !== "all") && books ? books.indexOf(b) + 1 : undefined);
 
+  const shownWish = wish?.filter((b) => category === null || b.category_ids.includes(category)) ?? null;
+  const overallWish = (b: WishlistItem) => (category !== null && wish ? wish.indexOf(b) + 1 : undefined);
+  const categoryName = categories.find((c) => c.id === category)?.name ?? "";
+  const categoryEmpty = ![...(books ?? []), ...(wish ?? [])].some((b) => b.category_ids.includes(category ?? 0));
+
+  // As with reads, a filtered list swaps among the slots its books hold.
   function handleWishReorder(newOrder: WishlistItem[]) {
-    setWish(newOrder);
+    if (!wish) return;
+    const members = new Set(newOrder.map((b) => b.book_id));
+    let next = 0;
+    const all = wish.map((b) => (members.has(b.book_id) ? newOrder[next++] : b));
+    setWish(all);
     api("/api/me/wishlist/reorder", {
       method: "POST",
-      body: JSON.stringify({ ordered: newOrder.map((b) => b.book_id) }),
+      body: JSON.stringify({ ordered: all.map((b) => b.book_id) }),
     }).catch((e) => setReadError(errorMessage(e)));
+  }
+
+  function categoryAdder(list: { book_id: number; title: string; category_ids: number[] }[], startOpen: boolean) {
+    if (!isSelf || category === null) return null;
+    return (
+      <CategoryAdder
+        key={category}
+        name={categoryName}
+        books={list.filter((b) => !b.category_ids.includes(category))}
+        onAdd={(bookId) => {
+          const ids = list.find((b) => b.book_id === bookId)?.category_ids ?? [];
+          setBookCategories(bookId, [...ids, category]);
+        }}
+        startOpen={startOpen}
+      />
+    );
   }
 
   async function addWish(bookId: number) {
@@ -433,6 +468,11 @@ export default function Profile({ username, me }: Props) {
                       {!isSelf && b.listening ? <span className="badge">Listening</span> : null}
                     </div>
                     <Byline author={b.author} year={b.first_publish_year} />
+                    <CategoryTags
+                      categories={categories}
+                      ids={b.category_ids}
+                      onChange={isSelf ? (ids) => setBookCategories(b.book_id, ids) : undefined}
+                    />
                     {isSelf && (
                       <div className="toggle-row">
                         <FormatPicker
@@ -516,6 +556,18 @@ export default function Profile({ username, me }: Props) {
         </section>
       )}
 
+      {!readError && (isSelf ? !!(books?.length || wish?.length) : categories.length > 0) && (
+        <section className="card">
+          <h2 className="section-title">Categories</h2>
+          <CategoryBar
+            categories={categories}
+            selected={category}
+            onSelect={setCategory}
+            edit={isSelf ? categoryEdit : undefined}
+          />
+        </section>
+      )}
+
       {!readError && (
         <section className="card">
           <h2 className="section-title">Books read</h2>
@@ -533,26 +585,7 @@ export default function Profile({ username, me }: Props) {
               ))}
             </div>
           )}
-          {books && books.length > 0 && (
-            <CategoryBar
-              categories={categories}
-              selected={category}
-              onSelect={setCategory}
-              edit={isSelf ? categoryEdit : undefined}
-            />
-          )}
-          {isSelf && books && shown && category !== null && (
-            <CategoryAdder
-              key={category}
-              name={categories.find((c) => c.id === category)?.name ?? ""}
-              books={books.filter((b) => !b.category_ids.includes(category))}
-              onAdd={(bookId) => {
-                const ids = books.find((b) => b.book_id === bookId)?.category_ids ?? [];
-                setBookCategories(bookId, [...ids, category]);
-              }}
-              startOpen={!books.some((b) => b.category_ids.includes(category))}
-            />
-          )}
+          {books && categoryAdder(books, categoryEmpty)}
           {books === null || shown === null ? (
             <div className="loading">Loading…</div>
           ) : books.length === 0 ? (
@@ -617,7 +650,8 @@ export default function Profile({ username, me }: Props) {
       {!readError && (
         <section className="card">
           <h2 className="section-title">Wishlist</h2>
-          {wish === null ? (
+          {wish && categoryAdder(wish, categoryEmpty && books?.length === 0)}
+          {wish === null || shownWish === null ? (
             <div className="loading">Loading…</div>
           ) : wish.length === 0 ? (
             <div className="empty">
@@ -627,13 +661,18 @@ export default function Profile({ username, me }: Props) {
                   : `${username} has no public wishlist items yet.`}
               </p>
             </div>
+          ) : shownWish.length === 0 ? (
+            <div className="empty muted">No wishlist books in this category yet.</div>
           ) : isSelf ? (
-            <Reorder.Group axis="y" values={wish} onReorder={handleWishReorder} className="book-list">
-              {wish.map((b, i) => (
+            <Reorder.Group axis="y" values={shownWish} onReorder={handleWishReorder} className="book-list">
+              {shownWish.map((b, i) => (
                 <WishItem
                   key={b.book_id}
                   item={b}
                   index={i}
+                  overall={overallWish(b)}
+                  categories={categories}
+                  onSetCategories={(ids) => setBookCategories(b.book_id, ids)}
                   onToggleOwned={() => toggleOwned(b)}
                   onTogglePublic={() => toggleWishPublic(b)}
                   onStartReading={() => startReading(b.book_id)}
@@ -644,7 +683,7 @@ export default function Profile({ username, me }: Props) {
             </Reorder.Group>
           ) : (
             <ul className="book-list">
-              {wish.map((b) => (
+              {shownWish.map((b) => (
                 <li key={b.book_id} className="book-row">
                   <Cover url={b.cover_url} />
                   <div className="info">
@@ -655,6 +694,7 @@ export default function Profile({ username, me }: Props) {
                       {b.manual ? <span className="badge">manual</span> : null}
                     </div>
                     <Byline author={b.author} year={b.first_publish_year} />
+                    <CategoryTags categories={categories} ids={b.category_ids} />
                     {b.owned ? <div className="author">Owned</div> : null}
                   </div>
                   <div className="actions">{actions(b.book_id, b.mine)}</div>
@@ -815,6 +855,9 @@ function ReadItem({
 function WishItem({
   item,
   index,
+  overall,
+  categories,
+  onSetCategories,
   onToggleOwned,
   onTogglePublic,
   onStartReading,
@@ -823,6 +866,9 @@ function WishItem({
 }: {
   item: WishlistItem;
   index: number;
+  overall?: number;
+  categories: Category[];
+  onSetCategories: (ids: number[]) => void;
   onToggleOwned: () => void;
   onTogglePublic: () => void;
   onStartReading: () => void;
@@ -859,6 +905,8 @@ function WishItem({
           {item.manual ? <span className="badge">manual</span> : null}
         </div>
         <Byline author={item.author} year={item.first_publish_year} />
+        <OverallRank rank={overall} />
+        <CategoryTags categories={categories} ids={item.category_ids} onChange={onSetCategories} />
         <div className="toggle-row">
           <span className="muted">Owned</span>
           <Switch checked={!!item.owned} onChange={onToggleOwned} title="Mark as owned" />
