@@ -1,20 +1,24 @@
-import { useEffect, useState } from "react";
-import { api, errorMessage, type SearchHit } from "../api";
+import { useCallback, useEffect, useState } from "react";
+import { api, errorMessage } from "../api";
 import { useBookSearch } from "../useBookSearch";
 import { Byline, Cover } from "./ui/Book";
-import { IconBook, IconCheck, IconHeart } from "./ui/icons";
+import { IconCheck } from "./ui/icons";
+import { type Status, StatusChoice, StatusPicker } from "./ui/StatusPicker";
 import { Switch } from "./ui/Switch";
 
 export default function AddBook() {
   const [bookCount, setBookCount] = useState(0);
   const [bookLimit, setBookLimit] = useState<number | null>(25); // Default to 25, null = unlimited
 
-  useEffect(() => {
-    api<{ bookCount: number; maxBooks: number }>("/api/me/books").then((d) => {
-      setBookCount(d.bookCount);
-      setBookLimit(d.maxBooks === 0 ? null : d.maxBooks);
-    });
+  const loadCount = useCallback(async () => {
+    const d = await api<{ bookCount: number; maxBooks: number }>("/api/me/books");
+    setBookCount(d.bookCount);
+    setBookLimit(d.maxBooks === 0 ? null : d.maxBooks);
   }, []);
+
+  useEffect(() => {
+    loadCount();
+  }, [loadCount]);
 
   const atLimit = bookLimit !== null && bookCount >= bookLimit;
   const remaining = bookLimit !== null ? bookLimit - bookCount : null;
@@ -32,8 +36,8 @@ export default function AddBook() {
               : `${remaining} of ${bookLimit} book slots remaining.`}
         </p>
       </div>
-      <SearchPane atLimit={atLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
-      <ManualPane atLimit={atLimit} bookLimit={bookLimit} onBookAdded={() => setBookCount((c) => c + 1)} />
+      <SearchPane atLimit={atLimit} onBookAdded={loadCount} />
+      <ManualPane atLimit={atLimit} bookLimit={bookLimit} onBookAdded={loadCount} />
     </div>
   );
 }
@@ -47,38 +51,8 @@ interface PaneProps {
 function SearchPane({ atLimit, onBookAdded }: Omit<PaneProps, "bookLimit">) {
   const [q, setQ] = useState("");
   const { hits, searched, searching, error } = useBookSearch(q);
-  const [status, setStatus] = useState<Record<string, string>>({});
-
-  async function add(hit: SearchHit, target: "read" | "reading" | "wish") {
-    if (target === "read" && atLimit) return;
-
-    const key = `${hit.key}:${target}`;
-    setStatus((s) => ({ ...s, [key]: "Adding…" }));
-    try {
-      if (target === "read") {
-        await api("/api/books", {
-          method: "POST",
-          body: JSON.stringify({ ol_key: hit.key, year: hit.year }),
-        });
-        setStatus((s) => ({ ...s, [key]: "Added" }));
-        onBookAdded();
-      } else if (target === "reading") {
-        await api("/api/me/reading", {
-          method: "POST",
-          body: JSON.stringify({ ol_key: hit.key, year: hit.year }),
-        });
-        setStatus((s) => ({ ...s, [key]: "Reading" }));
-      } else {
-        await api("/api/me/wishlist", {
-          method: "POST",
-          body: JSON.stringify({ ol_key: hit.key, year: hit.year }),
-        });
-        setStatus((s) => ({ ...s, [key]: "Saved" }));
-      }
-    } catch (err) {
-      setStatus((s) => ({ ...s, [key]: errorMessage(err) }));
-    }
-  }
+  // Books moved between my lists since the search ran.
+  const [moved, setMoved] = useState<Record<string, Status>>({});
 
   return (
     <section className="add-section">
@@ -91,73 +65,33 @@ function SearchPane({ atLimit, onBookAdded }: Omit<PaneProps, "bookLimit">) {
 
       {hits.length > 0 && (
         <ul className="result-list">
-          {hits.map((h) => {
-            const readS = status[`${h.key}:read`];
-            const read2 = status[`${h.key}:reading`];
-            const wishS = status[`${h.key}:wish`];
-            return (
-              <li key={h.key} className="book-row">
-                <Cover url={h.coverUrl} />
-                <div className="info">
-                  <div className="title">
-                    {h.title}
-                    {h.added && (
-                      <span className="added-mark" title="Added by someone">
-                        <IconCheck size={14} />
-                      </span>
-                    )}
-                  </div>
-                  <Byline author={h.author} year={h.year} />
-                </div>
-                <div className="actions">
-                  {readS === "Added" ? (
-                    <span className="success-text">Added</span>
-                  ) : readS && readS !== "Adding…" ? (
-                    <span className="error-text">{readS}</span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => add(h, "read")}
-                      disabled={readS === "Adding…" || atLimit}
-                      title={atLimit ? "Book limit reached" : ""}
-                    >
-                      {readS === "Adding…" ? "…" : atLimit ? "Limit reached" : "My Books"}
-                    </button>
-                  )}
-                  {read2 === "Reading" ? (
-                    <span className="success-text">Reading</span>
-                  ) : read2 && read2 !== "Adding…" ? (
-                    <span className="error-text">{read2}</span>
-                  ) : (
-                    <button type="button" onClick={() => add(h, "reading")} disabled={read2 === "Adding…"}>
-                      {read2 === "Adding…" ? (
-                        "…"
-                      ) : (
-                        <>
-                          <IconBook /> Reading
-                        </>
-                      )}
-                    </button>
-                  )}
-                  {wishS === "Saved" ? (
-                    <span className="success-text">Saved</span>
-                  ) : wishS && wishS !== "Adding…" ? (
-                    <span className="error-text">{wishS}</span>
-                  ) : (
-                    <button type="button" onClick={() => add(h, "wish")} disabled={wishS === "Adding…"}>
-                      {wishS === "Adding…" ? (
-                        "…"
-                      ) : (
-                        <>
-                          <IconHeart /> Wishlist
-                        </>
-                      )}
-                    </button>
+          {hits.map((h) => (
+            <li key={h.key} className="book-row">
+              <Cover url={h.coverUrl} />
+              <div className="info">
+                <div className="title">
+                  {h.title}
+                  {h.added && (
+                    <span className="added-mark" title="Added by someone">
+                      <IconCheck size={14} />
+                    </span>
                   )}
                 </div>
-              </li>
-            );
-          })}
+                <Byline author={h.author} year={h.year} />
+              </div>
+              <div className="actions">
+                <StatusPicker
+                  status={moved[h.key] ?? h.mine}
+                  book={{ ol_key: h.key, year: h.year }}
+                  atLimit={atLimit}
+                  onChange={(next) => {
+                    setMoved((m) => ({ ...m, [h.key]: next }));
+                    onBookAdded();
+                  }}
+                />
+              </div>
+            </li>
+          ))}
         </ul>
       )}
 
@@ -172,7 +106,7 @@ function SearchPane({ atLimit, onBookAdded }: Omit<PaneProps, "bookLimit">) {
 }
 
 function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
-  const [target, setTarget] = useState<"read" | "reading" | "wish">("read");
+  const [target, setTarget] = useState<Status>("read");
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [year, setYear] = useState("");
@@ -221,17 +155,7 @@ function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
     <section className="form-section">
       <h3 className="section-title">Can't find your book? Add it manually</h3>
 
-      <div className="segmented">
-        <button type="button" className={target === "read" ? "active" : ""} onClick={() => setTarget("read")}>
-          My Books
-        </button>
-        <button type="button" className={target === "reading" ? "active" : ""} onClick={() => setTarget("reading")}>
-          Reading
-        </button>
-        <button type="button" className={target === "wish" ? "active" : ""} onClick={() => setTarget("wish")}>
-          Wishlist
-        </button>
-      </div>
+      <StatusChoice value={target} onChange={setTarget} labelled />
 
       {done && <div className="success">{done}</div>}
       {error && <div className="error">{error}</div>}

@@ -44,3 +44,25 @@ test("0016_shared_categories keeps existing category assignments", () => {
 
   expect(sqlite.query("SELECT * FROM category_books").all()).toEqual([{ category_id: 3, user_id: 1, book_id: 7 }]);
 });
+
+test("0017 keeps open nominations, and their votes as first choices", () => {
+  const sqlite = new Database(":memory:");
+  sqlite.run("PRAGMA foreign_keys = ON");
+  migrate(sqlite, undefined, "0017_ranked_voting.sql");
+  sqlite.run("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'a', 'a@test.dev', 'x')");
+  sqlite.run("INSERT INTO books (id, ol_key, title) VALUES (7, 'k', 'Dune')");
+  sqlite.run("INSERT INTO clubs (id, name, creator_id) VALUES (2, 'Club', 1)");
+  sqlite.run("INSERT INTO club_nominations (id, club_id, user_id, book_id) VALUES (3, 2, 1, 7)");
+  sqlite.run("INSERT INTO club_votes (nomination_id, user_id) VALUES (3, 1)");
+
+  migrate(sqlite, "0017_ranked_voting.sql");
+
+  expect(sqlite.query("SELECT id, pick_id, eliminated FROM club_nominations").all()).toEqual([
+    { id: 3, pick_id: null, eliminated: 0 },
+  ]);
+  expect(sqlite.query("SELECT nomination_id, user_id, rank FROM club_votes").all()).toEqual([
+    { nomination_id: 3, user_id: 1, rank: 1 },
+  ]);
+  sqlite.run("DELETE FROM club_nominations");
+  expect(sqlite.query("SELECT * FROM club_votes").all()).toEqual([]);
+});

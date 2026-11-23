@@ -2,6 +2,7 @@ import { execute, now, queryAll, queryOne } from "../db";
 import { BOOK_COLUMNS, type BookRef, type BookRow, resolveBook } from "./books";
 import { FRIEND_IDS } from "./friends";
 import { fail, notFound, type Result } from "./result";
+import { getBookAllowance } from "./users";
 
 interface ListRow extends BookRow {
   book_id: number;
@@ -497,4 +498,37 @@ export async function viewerOwnership(db: D1Database, viewerId: number): Promise
   const status = new Map<number, MineStatus>();
   for (const r of rows) if (!status.has(r.book_id)) status.set(r.book_id, r.list);
   return (bookId) => status.get(bookId) ?? null;
+}
+
+// Puts a book on one of the user's lists, moving it there from another. A book
+// already read stays on the read list when it is read again.
+export async function setStatus(
+  db: D1Database,
+  userId: number,
+  ref: BookRef,
+  status: Exclude<MineStatus, null>,
+): Promise<Result<{ book: BookRow }>> {
+  const r = await resolveBook(db, ref);
+  if (!r.ok) return r;
+  const bookId = r.book.id;
+  const [read, wish, reading] = await Promise.all(
+    (["reads", "wishlist", "reading"] as const).map((list) => onList(db, list, userId, bookId)),
+  );
+
+  let moved: Result = { ok: true };
+  if (status === "reading") {
+    if (!reading) moved = await addToReading(db, userId, { bookId });
+  } else if (status === "wish") {
+    if (read) moved = fail("You've already read this — it's on your books list");
+    else if (reading) moved = await backToWishlist(db, userId, bookId);
+    else if (!wish) moved = await insertWish(db, userId, bookId);
+  } else if (reading) {
+    moved = await finishReading(db, userId, bookId);
+  } else if (wish) {
+    moved = await moveToRead(db, userId, bookId);
+  } else if (!read) {
+    const { canAdd, limit } = await getBookAllowance(db, userId);
+    moved = canAdd ? await insertRead(db, userId, bookId) : fail(`You have reached the maximum of ${limit} books`);
+  }
+  return moved.ok ? r : moved;
 }

@@ -37,14 +37,15 @@ async function getBookById(db: D1Database, id: number): Promise<BookRow | null> 
   return await queryOne<BookRow>(db, "SELECT * FROM books WHERE id = ?", id);
 }
 
-export async function getExistingBookKeys(db: D1Database, keys: string[]): Promise<Set<string>> {
-  if (keys.length === 0) return new Set();
-  const rows = await queryAll<{ ol_key: string }>(
+// Book ids by Open Library key, for the keys that are already in the system.
+export async function getExistingBookKeys(db: D1Database, keys: string[]): Promise<Map<string, number>> {
+  if (keys.length === 0) return new Map();
+  const rows = await queryAll<{ id: number; ol_key: string }>(
     db,
-    `SELECT ol_key FROM books WHERE ol_key IN (${keys.map(() => "?").join(",")})`,
+    `SELECT id, ol_key FROM books WHERE ol_key IN (${keys.map(() => "?").join(",")})`,
     ...keys,
   );
-  return new Set(rows.map((r) => r.ol_key));
+  return new Map(rows.map((r) => [r.ol_key, r.id]));
 }
 
 async function getOrCreateByOlKey(db: D1Database, olKey: string, yearHint?: number): Promise<BookRow | null> {
@@ -108,7 +109,7 @@ export interface MyBookHit {
   author: string;
   coverUrl?: string;
   year?: number;
-  list: "reading" | "wishlist" | "read";
+  list: "reading" | "wish" | "read";
 }
 
 // Books from the user's own lists (reading, wishlist, read) whose title or
@@ -123,7 +124,7 @@ export async function searchMyBooks(db: D1Database, userId: number, q: string): 
      JOIN (
        SELECT book_id, 'reading' AS list, 0 AS ord FROM reading WHERE user_id = ?1
        UNION ALL
-       SELECT book_id, 'wishlist' AS list, 1 AS ord FROM wishlist WHERE user_id = ?1
+       SELECT book_id, 'wish' AS list, 1 AS ord FROM wishlist WHERE user_id = ?1
        UNION ALL
        SELECT book_id, 'read' AS list, 2 AS ord FROM reads WHERE user_id = ?1
      ) x ON x.book_id = b.id

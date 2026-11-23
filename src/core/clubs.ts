@@ -1,6 +1,7 @@
 import { execute, queryAll, queryOne } from "../db";
 import { type BookRef, resolveBook } from "./books";
 import { isFriend } from "./friends";
+import { type MineStatus, viewerOwnership } from "./lists";
 import { createNotification, markNotificationsRead } from "./notifications";
 import { type Failure, fail, forbidden, notFound, type Result } from "./result";
 import { findUser, type User, usernameOf } from "./users";
@@ -44,10 +45,14 @@ interface ClubNominationRow {
   manual: number;
   user_id: number;
   nominatedBy: string;
-  votes: number;
   vetoed_by: number | null;
   vetoedBy: string | null;
+  eliminated: number;
   created_at: number;
+}
+
+interface ClubResultRow extends ClubNominationRow, Tally {
+  mine: MineStatus;
 }
 
 interface ClubPickRow {
@@ -89,24 +94,31 @@ export interface ClubDetail {
   stage: ClubStage;
   members: ClubMemberRow[];
   nominations: ClubNominationRow[];
-  myVote: number | null;
+  // Nomination ids, first choice first.
+  myBallot: number[];
+  // How many members have voted; the votes themselves stay hidden until the round closes.
+  votedCount: number;
   myVetoUsed: boolean;
-  // isReading: the viewer has it in currently reading.
-  currentPick: (ClubPickRow & { isReading: boolean }) | null;
+  currentPick: (ClubPickRow & { mine: MineStatus }) | null;
   pastPicks: ClubPickRow[];
 }
 
 const PICK_COLUMNS =
   "p.id, p.club_id, p.book_id, p.picked_at, b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual";
 
-// Nominations with their live vote counts.
-const NOMINATIONS = `SELECT n.id, n.book_id, n.user_id, n.created_at, n.vetoed_by,
+const NOMINATION_COLUMNS = `n.id, n.book_id, n.user_id, n.created_at, n.vetoed_by, n.eliminated,
     u.username AS nominatedBy,
     (SELECT username FROM users WHERE id = n.vetoed_by) AS vetoedBy,
-    b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual,
-    (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id) AS votes
-  FROM club_nominations n JOIN books b ON b.id = n.book_id JOIN users u ON u.id = n.user_id
-  WHERE n.club_id = ?`;
+    b.ol_key, b.title, b.author, b.cover_url, b.first_publish_year, b.manual`;
+
+const NOMINATIONS_FROM =
+  "FROM club_nominations n JOIN books b ON b.id = n.book_id JOIN users u ON u.id = n.user_id WHERE n.club_id = ?";
+
+// Nominations still in the running (a runoff drops the rest), for the club ?1.
+const IN_PLAY = "SELECT id FROM club_nominations WHERE club_id = ?1 AND pick_id IS NULL AND eliminated = 0";
+
+const MAX_NOMINATIONS = 3;
+const MAX_RANKED = 3;
 
 export async function getClubMembership(db: D1Database, clubId: number, userId: number): Promise<Membership | null> {
   return await queryOne<Membership>(
@@ -143,16 +155,17 @@ function votingClosed(club: ClubRow, closed = "Voting is closed for the current 
 async function clearVote(db: D1Database, clubId: number, userId: number): Promise<void> {
   await execute(
     db,
-    "DELETE FROM club_votes WHERE user_id = ? AND nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)",
-    userId,
+    `DELETE FROM club_votes WHERE user_id = ?2
+       AND nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?1 AND pick_id IS NULL)`,
     clubId,
+    userId,
   );
 }
 
 async function clearAllVotes(db: D1Database, clubId: number): Promise<void> {
   await execute(
     db,
-    "DELETE FROM club_votes WHERE nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ?)",
+    "DELETE FROM club_votes WHERE nomination_id IN (SELECT id FROM club_nominations WHERE club_id = ? AND pick_id IS NULL)",
     clubId,
   );
 }
@@ -178,38 +191,35 @@ async function notifyMembers(
 
 // ---------- Vote counting ----------
 
-interface Tallied {
-  votes: number;
+interface Tally {
+  points: number;
+  firsts: number;
+  seconds: number;
+  thirds: number;
 }
 
-// A pick needs a simple majority: more than half the votes cast.
-function tally<T extends Tallied>(nominations: T[]) {
-  const totalVotes = nominations.reduce((sum, n) => sum + n.votes, 0);
-  const topVotes = Math.max(0, ...nominations.map((n) => n.votes));
-  const leaders = nominations.filter((n) => n.votes === topVotes);
-  return { totalVotes, leaders, hasMajority: leaders.length === 1 && topVotes * 2 > totalVotes };
-}
+// A first choice is worth 3 points, a second 2 and a third 1.
+const TALLY_COLUMNS = `(SELECT COALESCE(SUM(${MAX_RANKED + 1} - v.rank), 0) FROM club_votes v WHERE v.nomination_id = n.id) AS points,
+    (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id AND v.rank = 1) AS firsts,
+    (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id AND v.rank = 2) AS seconds,
+    (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id AND v.rank = 3) AS thirds`;
 
-// The runoff field: the top two vote-getters. A tie at the top keeps all
-// tied leaders; a single leader is joined by whoever ties for second.
-// Mirrors runoffField in web/src/components/ClubDetail.tsx.
-function runoffField<T extends Tallied>(nominations: T[]): T[] {
-  const { leaders } = tally(nominations);
-  if (leaders.length > 1) return leaders;
-  const rest = nominations.filter((n) => n.votes < leaders[0].votes);
-  if (rest.length === 0) return leaders;
-  return [...leaders, ...tally(rest).leaders];
-}
-
-async function activeNominations(db: D1Database, clubId: number) {
-  return await queryAll<{ id: number; book_id: number; title: string; votes: number }>(
+async function tallyVotes(db: D1Database, clubId: number) {
+  return await queryAll<Tally & { id: number; book_id: number; title: string }>(
     db,
-    `SELECT n.id, n.book_id, b.title, (SELECT COUNT(*) FROM club_votes v WHERE v.nomination_id = n.id) AS votes
+    `SELECT n.id, n.book_id, b.title, ${TALLY_COLUMNS}
      FROM club_nominations n JOIN books b ON b.id = n.book_id
-     WHERE n.club_id = ? AND n.vetoed_by IS NULL
-     ORDER BY n.created_at ASC`,
+     WHERE n.id IN (${IN_PLAY}) AND n.vetoed_by IS NULL
+     ORDER BY points DESC, firsts DESC, seconds DESC, n.created_at ASC, n.id ASC`,
     clubId,
   );
+}
+
+// Most points wins; equal points go to more first choices, then more second
+// choices. Several leaders are a tie only a runoff can settle.
+function leadersOf<T extends Tally>(tallied: T[]): T[] {
+  const [top] = tallied;
+  return tallied.filter((n) => n.points === top.points && n.firsts === top.firsts && n.seconds === top.seconds);
 }
 
 const quoted = (titles: string[], joiner: string) => titles.map((t) => `"${t}"`).join(joiner);
@@ -300,7 +310,7 @@ export async function listClubsForUser(
     `SELECT c.id, c.name, c.description, c.stage, c.created_at, m.role,
        (SELECT COUNT(*) FROM club_members cm WHERE cm.club_id = c.id AND cm.status = 'accepted') AS memberCount,
        (SELECT COUNT(*) FROM club_members cm WHERE cm.club_id = c.id AND cm.status = 'pending') AS invitedCount,
-       (SELECT COUNT(*) FROM club_nominations n WHERE n.club_id = c.id) AS nominationCount
+       (SELECT COUNT(*) FROM club_nominations n WHERE n.club_id = c.id AND n.pick_id IS NULL) AS nominationCount
      FROM clubs c JOIN club_members m ON m.club_id = c.id
      WHERE m.user_id = ? AND m.status = 'accepted'
      ORDER BY c.created_at DESC`,
@@ -343,12 +353,14 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
        u.username COLLATE NOCASE`,
     clubId,
   );
-  const nominations = await queryAll<ClubNominationRow>(db, `${NOMINATIONS} ORDER BY n.created_at ASC`, clubId);
-  const myVote = await queryOne<{ nomination_id: number }>(
+  const nominations = await queryAll<ClubNominationRow>(
     db,
-    `SELECT v.nomination_id FROM club_votes v JOIN club_nominations n ON n.id = v.nomination_id
-     WHERE v.user_id = ? AND n.club_id = ?`,
-    userId,
+    `SELECT ${NOMINATION_COLUMNS} ${NOMINATIONS_FROM} AND n.pick_id IS NULL ORDER BY n.created_at ASC, n.id ASC`,
+    clubId,
+  );
+  const votes = await queryAll<{ nomination_id: number; user_id: number }>(
+    db,
+    `SELECT nomination_id, user_id FROM club_votes WHERE nomination_id IN (${IN_PLAY}) ORDER BY rank ASC`,
     clubId,
   );
   const picks = await queryAll<ClubPickRow>(
@@ -358,9 +370,7 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
     clubId,
   );
   const [pick, ...pastPicks] = picks;
-  const reading = pick
-    ? await queryOne(db, "SELECT 1 FROM reading WHERE user_id = ? AND book_id = ?", userId, pick.book_id)
-    : null;
+  const mine = await viewerOwnership(db, userId);
 
   return {
     ok: true,
@@ -370,11 +380,45 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
       stage: club.stage,
       members,
       nominations,
-      myVote: myVote?.nomination_id ?? null,
+      myBallot: votes.filter((v) => v.user_id === userId).map((v) => v.nomination_id),
+      votedCount: new Set(votes.map((v) => v.user_id)).size,
       myVetoUsed: nominations.some((n) => n.vetoed_by === userId),
-      currentPick: pick ? { ...pick, isReading: !!reading } : null,
+      currentPick: pick ? { ...pick, mine: mine(pick.book_id) } : null,
       pastPicks,
     },
+  };
+}
+
+// A closed round, best result first. Picks from before ballots were kept have no nominations.
+export async function getClubResults(
+  db: D1Database,
+  userId: number,
+  clubId: number,
+  pickId: number,
+): Promise<Result<{ voters: number; nominations: ClubResultRow[] }>> {
+  const r = await loadClub(db, userId, clubId, "member");
+  if (!r.ok) return r;
+  if (!(await queryOne(db, "SELECT 1 FROM club_picks WHERE id = ? AND club_id = ?", pickId, clubId))) {
+    return notFound("Results not found");
+  }
+  const rows = await queryAll<Omit<ClubResultRow, "mine">>(
+    db,
+    `SELECT ${NOMINATION_COLUMNS}, ${TALLY_COLUMNS} ${NOMINATIONS_FROM} AND n.pick_id = ?
+     ORDER BY n.vetoed_by IS NOT NULL, n.eliminated, points DESC, firsts DESC, seconds DESC, n.created_at, n.id`,
+    clubId,
+    pickId,
+  );
+  const voters = await queryOne<{ c: number }>(
+    db,
+    `SELECT COUNT(DISTINCT v.user_id) AS c FROM club_votes v JOIN club_nominations n ON n.id = v.nomination_id
+     WHERE n.pick_id = ?`,
+    pickId,
+  );
+  const mine = await viewerOwnership(db, userId);
+  return {
+    ok: true,
+    voters: voters?.c ?? 0,
+    nominations: rows.map((n) => ({ ...n, mine: mine(n.book_id) })),
   };
 }
 
@@ -504,8 +548,15 @@ export async function nominateBook(db: D1Database, userId: number, clubId: numbe
   }
   const b = await resolveBook(db, ref);
   if (!b.ok) return b;
-  const dup = await queryOne(db, "SELECT 1 FROM club_nominations WHERE club_id = ? AND book_id = ?", clubId, b.book.id);
-  if (dup) return fail("That book is already nominated");
+  const open = await queryAll<{ book_id: number; user_id: number }>(
+    db,
+    "SELECT book_id, user_id FROM club_nominations WHERE club_id = ? AND pick_id IS NULL",
+    clubId,
+  );
+  if (open.some((n) => n.book_id === b.book.id)) return fail("That book is already nominated");
+  if (open.filter((n) => n.user_id === userId).length >= MAX_NOMINATIONS) {
+    return fail(`You've used all ${MAX_NOMINATIONS} of your nominations`);
+  }
 
   await execute(
     db,
@@ -528,46 +579,50 @@ export async function nominateBook(db: D1Database, userId: number, clubId: numbe
   return { ok: true };
 }
 
-export async function voteForNomination(
-  db: D1Database,
-  userId: number,
-  clubId: number,
-  nominationId: number,
-): Promise<Result> {
+// Replaces the member's ballot: nomination ids, first choice first.
+export async function castBallot(db: D1Database, userId: number, clubId: number, ballot: number[]): Promise<Result> {
   const r = await loadClub(db, userId, clubId, "member");
   if (!r.ok) return r;
   const closed = votingClosed(r.club);
   if (closed) return closed;
-  const nomination = await queryOne<{ vetoed_by: number | null }>(
-    db,
-    "SELECT vetoed_by FROM club_nominations WHERE id = ? AND club_id = ?",
-    nominationId,
-    clubId,
-  );
-  if (!nomination) return notFound("Nomination not found");
-  if (nomination.vetoed_by != null) return fail("That nomination was vetoed");
+  if (ballot.length > MAX_RANKED) return fail(`Rank up to ${MAX_RANKED} books`);
+  if (new Set(ballot).size !== ballot.length) return fail("Rank each book once");
+  for (const id of ballot) {
+    const nomination = await nominationTitle(db, clubId, id);
+    if (!nomination) return notFound("Nomination not found");
+    if (nomination.vetoed_by != null) return fail(`"${nomination.title}" was vetoed`);
+  }
 
-  // One vote per member per club: replace any previous vote.
-  await clearVote(db, clubId, userId);
-  await execute(db, "INSERT INTO club_votes (nomination_id, user_id) VALUES (?, ?)", nominationId, userId);
-  return { ok: true };
-}
-
-export async function removeVote(db: D1Database, userId: number, clubId: number): Promise<Result> {
-  const r = await loadClub(db, userId, clubId, "member");
-  if (!r.ok) return r;
-  await clearVote(db, clubId, userId);
+  await db.batch([
+    db.prepare(`DELETE FROM club_votes WHERE user_id = ?2 AND nomination_id IN (${IN_PLAY})`).bind(clubId, userId),
+    ...ballot.map((id, i) =>
+      db.prepare("INSERT INTO club_votes (nomination_id, user_id, rank) VALUES (?, ?, ?)").bind(id, userId, i + 1),
+    ),
+  ]);
   return { ok: true };
 }
 
 async function nominationTitle(db: D1Database, clubId: number, nominationId: number) {
-  return await queryOne<{ title: string; vetoed_by: number | null }>(
+  return await queryOne<{ title: string; vetoed_by: number | null; user_id: number }>(
     db,
-    `SELECT b.title, n.vetoed_by FROM club_nominations n JOIN books b ON b.id = n.book_id
-     WHERE n.id = ? AND n.club_id = ?`,
-    nominationId,
+    `SELECT b.title, n.vetoed_by, n.user_id FROM club_nominations n JOIN books b ON b.id = n.book_id
+     WHERE n.id = ?2 AND n.id IN (${IN_PLAY})`,
     clubId,
+    nominationId,
   );
+}
+
+// Takes a book off every ballot, moving each voter's later choices up.
+async function releaseVotes(db: D1Database, clubId: number, nominationId: number): Promise<void> {
+  await execute(
+    db,
+    `UPDATE club_votes SET rank = rank - 1
+     WHERE nomination_id IN (${IN_PLAY})
+       AND rank > (SELECT x.rank FROM club_votes x WHERE x.nomination_id = ?2 AND x.user_id = club_votes.user_id)`,
+    clubId,
+    nominationId,
+  );
+  await execute(db, "DELETE FROM club_votes WHERE nomination_id = ?", nominationId);
 }
 
 export async function vetoNomination(
@@ -584,14 +639,17 @@ export async function vetoNomination(
   if (!nomination) return notFound("Nomination not found");
   if (nomination.vetoed_by != null) return fail("That nomination was already vetoed");
 
-  // One veto per member per vote cycle (a cycle's vetoes die with its
-  // nominations when the vote closes).
-  const used = await queryOne(db, "SELECT 1 FROM club_nominations WHERE club_id = ? AND vetoed_by = ?", clubId, userId);
+  // One veto per member per round.
+  const used = await queryOne(
+    db,
+    "SELECT 1 FROM club_nominations WHERE club_id = ? AND pick_id IS NULL AND vetoed_by = ?",
+    clubId,
+    userId,
+  );
   if (used) return fail("You've already used your veto for this vote");
 
   await execute(db, "UPDATE club_nominations SET vetoed_by = ? WHERE id = ?", userId, nominationId);
-  // Anyone voting for it gets their vote back.
-  await execute(db, "DELETE FROM club_votes WHERE nomination_id = ?", nominationId);
+  await releaseVotes(db, clubId, nominationId);
   const vetoer = await usernameOf(db, userId);
   await notifyMembers(db, r.club, userId, "club_veto", `${vetoer} vetoed "${nomination.title}" in "${r.club.name}"`, {
     bookTitle: nomination.title,
@@ -605,23 +663,27 @@ export async function removeNomination(
   clubId: number,
   nominationId: number,
 ): Promise<Result> {
-  const r = await loadClub(db, userId, clubId, "owner", "remove nominations");
+  const r = await loadClub(db, userId, clubId, "member");
   if (!r.ok) return r;
   const nomination = await nominationTitle(db, clubId, nominationId);
   if (!nomination) return notFound("Nomination not found");
+  const withdrawing = nomination.user_id === userId && r.club.stage === "nominating" && nomination.vetoed_by == null;
+  if (r.membership.role !== "owner" && !withdrawing) {
+    return forbidden("Only the club owner can remove nominations");
+  }
 
   // A removal takes the book out entirely — votes on it are released, and
   // because the row is gone it can be nominated again like new. Unlike a
   // veto it isn't recorded anywhere (that's the point: it never belonged).
-  await execute(db, "DELETE FROM club_votes WHERE nomination_id = ?", nominationId);
+  await releaseVotes(db, clubId, nominationId);
   await execute(db, "DELETE FROM club_nominations WHERE id = ?", nominationId);
-  const owner = await usernameOf(db, userId);
+  const remover = await usernameOf(db, userId);
   await notifyMembers(
     db,
     r.club,
     userId,
     "club_nomination_removed",
-    `${owner} removed "${nomination.title}" from the vote in "${r.club.name}"`,
+    `${remover} ${withdrawing ? "withdrew" : "removed"} "${nomination.title}" from the vote in "${r.club.name}"`,
     { bookTitle: nomination.title },
   );
   return { ok: true };
@@ -639,38 +701,38 @@ export async function closeVote(
   const closed = votingClosed(r.club, "Voting is already closed");
   if (closed) return closed;
 
-  // Vetoed nominations can't win — only active ones count.
-  const nominations = await activeNominations(db, clubId);
-  if (nominations.length === 0) {
+  const tallied = await tallyVotes(db, clubId);
+  if (tallied.length === 0) {
     const anyVetoed = await queryOne(
       db,
-      "SELECT 1 FROM club_nominations WHERE club_id = ? AND vetoed_by IS NOT NULL",
+      "SELECT 1 FROM club_nominations WHERE club_id = ? AND pick_id IS NULL AND vetoed_by IS NOT NULL",
       clubId,
     );
     return fail(anyVetoed ? "Every nomination was vetoed" : "No nominations yet");
   }
-  const { totalVotes, leaders, hasMajority } = tally(nominations);
-  if (totalVotes === 0) return fail("No votes cast yet");
-  if (!hasMajority) {
-    const reason =
-      leaders.length > 1
-        ? `It's a tie between ${quoted(
-            leaders.map((n) => n.title),
-            " and ",
-          )}`
-        : `"${leaders[0].title}" leads with ${leaders[0].votes} of ${totalVotes} votes — short of a majority`;
+  if (tallied[0].points === 0) return fail("No votes cast yet");
+  const leaders = leadersOf(tallied);
+  if (leaders.length > 1) {
+    const runoffTitles = leaders.map((n) => n.title);
     return {
-      ...fail(`${reason} — start a runoff`),
+      ...fail(`It's a tie between ${quoted(runoffTitles, " and ")} — start a runoff`),
       runoffNeeded: true,
-      runoffTitles: runoffField(nominations).map((n) => n.title),
+      runoffTitles,
     };
   }
 
-  const winner = leaders[0];
-  await execute(db, "INSERT INTO club_picks (club_id, book_id) VALUES (?, ?)", clubId, winner.book_id);
-  await clearAllVotes(db, clubId);
-  await execute(db, "DELETE FROM club_nominations WHERE club_id = ?", clubId);
-  await execute(db, "UPDATE clubs SET stage = 'closed' WHERE id = ?", clubId);
+  const [winner] = leaders;
+  const pick = await queryOne<{ id: number }>(
+    db,
+    "INSERT INTO club_picks (club_id, book_id) VALUES (?, ?) RETURNING id",
+    clubId,
+    winner.book_id,
+  );
+  if (!pick) return fail("Could not close the vote");
+  await db.batch([
+    db.prepare("UPDATE club_nominations SET pick_id = ? WHERE club_id = ? AND pick_id IS NULL").bind(pick.id, clubId),
+    db.prepare("UPDATE clubs SET stage = 'closed' WHERE id = ?").bind(clubId),
+  ]);
   await notifyMembers(db, r.club, userId, "club_pick", `"${winner.title}" won the vote in "${r.club.name}"`, {
     bookId: winner.book_id,
     bookTitle: winner.title,
@@ -684,31 +746,26 @@ export async function startRunoff(db: D1Database, userId: number, clubId: number
   const closed = votingClosed(r.club);
   if (closed) return closed;
 
-  const active = await activeNominations(db, clubId);
-  const { totalVotes, leaders, hasMajority } = tally(active);
-  if (totalVotes === 0) return fail("No votes cast yet");
-  if (hasMajority) {
-    return fail(
-      `"${leaders[0].title}" already has a majority (${leaders[0].votes} of ${totalVotes} votes) — close the vote to pick it`,
-    );
-  }
+  const tallied = await tallyVotes(db, clubId);
+  if (tallied.length === 0 || tallied[0].points === 0) return fail("No votes cast yet");
+  const leaders = leadersOf(tallied);
+  if (leaders.length === 1) return fail("There's no tie — close the vote to pick the winner");
 
-  // Drop the also-rans and reset the votes on the runoff field so everyone
-  // re-votes with the final field in view. Vetoed rows stay struck until the
-  // vote closes.
-  const field = runoffField(active);
-  const ids = field.map((n) => n.id);
+  // The rest drop out but keep their votes for the results; the tied books
+  // start over. Vetoed rows stay as they are.
+  const ids = leaders.map((n) => n.id);
   const placeholders = ids.map(() => "?").join(",");
   await execute(
     db,
-    `DELETE FROM club_nominations WHERE club_id = ? AND id NOT IN (${placeholders}) AND vetoed_by IS NULL`,
+    `UPDATE club_nominations SET eliminated = 1
+     WHERE club_id = ? AND pick_id IS NULL AND vetoed_by IS NULL AND id NOT IN (${placeholders})`,
     clubId,
     ...ids,
   );
   await execute(db, `DELETE FROM club_votes WHERE nomination_id IN (${placeholders})`, ...ids);
   await execute(db, "UPDATE clubs SET stage = 'runoff' WHERE id = ?", clubId);
 
-  const titles = field.map((n) => n.title);
+  const titles = leaders.map((n) => n.title);
   await notifyMembers(
     db,
     r.club,
@@ -741,7 +798,7 @@ export async function startVoting(db: D1Database, userId: number, clubId: number
   const r = await loadClub(db, userId, clubId, "owner", "open the vote");
   if (!r.ok) return r;
   if (r.club.stage !== "nominating") return fail("The club is not in the nomination stage");
-  if ((await activeNominations(db, clubId)).length === 0) {
+  if ((await tallyVotes(db, clubId)).length === 0) {
     return fail("Nominate at least one book before opening the vote");
   }
   await execute(db, "UPDATE clubs SET stage = 'voting' WHERE id = ?", clubId);
@@ -751,12 +808,13 @@ export async function startVoting(db: D1Database, userId: number, clubId: number
 
 // Voting -> nominating: the owner resets the vote (including a runoff) and
 // reopens nominations. All cast votes are cleared; nominations and vetoes
-// stay so the field can be adjusted before voting again.
+// stay (runoff also-rans return) so the field can be adjusted before voting again.
 export async function backToNominations(db: D1Database, userId: number, clubId: number): Promise<Result> {
   const r = await loadClub(db, userId, clubId, "owner", "reset the vote");
   if (!r.ok) return r;
   if (!isVoting(r.club)) return fail("Voting is not open");
   await clearAllVotes(db, clubId);
+  await execute(db, "UPDATE club_nominations SET eliminated = 0 WHERE club_id = ? AND pick_id IS NULL", clubId);
   await execute(db, "UPDATE clubs SET stage = 'nominating' WHERE id = ?", clubId);
   await notifyMembers(
     db,

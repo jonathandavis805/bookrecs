@@ -374,6 +374,63 @@ textarea:focus {
   color: var(--on-accent);
 }
 
+.status-picker button {
+  min-width: 40px;
+  min-height: 36px;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.status-picker button:hover:not(.active, :disabled) {
+  background: var(--hover);
+}
+
+.status-picker button:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+/* ---------- Tooltip ---------- */
+.tooltip-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: 50;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  box-shadow: var(--shadow-md);
+  color: var(--on-accent);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.tooltip.animated {
+  animation: tooltip-in 0.125s ease-out;
+}
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tooltip.animated {
+    animation: none;
+  }
+}
+
 /* ---------- Chips ---------- */
 .chip-picker {
   display: flex;
@@ -1025,7 +1082,6 @@ textarea:focus {
 }
 
 .my-lists,
-.my-list-actions,
 .friend-book-head {
   display: flex;
   flex-wrap: wrap;
@@ -1033,8 +1089,7 @@ textarea:focus {
   gap: 8px;
 }
 
-.my-lists,
-.my-list-actions {
+.my-lists {
   margin-top: 12px;
 }
 
@@ -1568,6 +1623,51 @@ textarea:focus {
   text-decoration: line-through;
 }
 
+.club-book-row.struck .title {
+  text-decoration: line-through;
+}
+
+.ballot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.ballot .plain-list:empty {
+  display: none;
+}
+
+.book-row.ballot-row {
+  flex-wrap: nowrap;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.book-row.ballot-row.open {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: transparent;
+}
+
+.ballot-row .rank {
+  padding-top: 0;
+}
+
+.results-note {
+  margin-bottom: 12px;
+}
+
+.tally {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+
+.tally strong {
+  color: var(--text);
+}
+
 .vote-btn.on,
 .vote-btn.on:hover:not(:disabled) {
   border-color: var(--accent);
@@ -1644,7 +1744,7 @@ textarea:focus {
     display: none;
   }
 
-  .actions {
+  .actions:not(.results-pager) {
     justify-content: flex-end;
     width: 100%;
   }

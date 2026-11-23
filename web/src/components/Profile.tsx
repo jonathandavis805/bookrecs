@@ -1,4 +1,4 @@
-import { Reorder, useDragControls } from "framer-motion";
+import { Reorder } from "framer-motion";
 import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useState } from "react";
 import {
   api,
@@ -6,6 +6,7 @@ import {
   type Category,
   errorMessage,
   type ListItem,
+  type MineStatus,
   type NextUpItem,
   type ReadingItem,
   type User,
@@ -13,7 +14,9 @@ import {
 } from "../api";
 import { CategoryAdder, CategoryBar, CategoryTags } from "./Categories";
 import { Byline, Cover } from "./ui/Book";
-import { IconBook, IconChevronDown, IconGrip, IconHeart, IconUndo, IconX } from "./ui/icons";
+import { IconBook, IconChevronDown, IconUndo } from "./ui/icons";
+import { RemoveButton, SortableRow } from "./ui/SortableRow";
+import { type Status, StatusPicker } from "./ui/StatusPicker";
 import { Switch } from "./ui/Switch";
 
 interface Props {
@@ -21,7 +24,6 @@ interface Props {
   me: User;
 }
 
-type Mine = "read" | "wish" | "reading" | null;
 type ListName = "books" | "wishlist" | "reading";
 type Format = "all" | "read" | "listened";
 
@@ -38,7 +40,8 @@ export default function Profile({ username, me }: Props) {
   const [reading, setReading] = useState<ReadingItem[] | null>(null);
   const [nextUp, setNextUp] = useState<NextUpItem | null>(null);
   const [readError, setReadError] = useState("");
-  const [wishStatus, setWishStatus] = useState<Record<number, string>>({});
+  // Books moved between my lists since a friend's lists were loaded.
+  const [moved, setMoved] = useState<Record<number, Status>>({});
 
   // Edit state for self
   const [reviews, setReviews] = useState<Record<number, string>>({});
@@ -278,44 +281,15 @@ export default function Profile({ username, me }: Props) {
     );
   }
 
-  async function addWish(bookId: number) {
-    setWishStatus((s) => ({ ...s, [bookId]: "Adding…" }));
-    try {
-      await api("/api/me/wishlist", { method: "POST", body: JSON.stringify({ book_id: bookId }) });
-      setWishStatus((s) => ({ ...s, [bookId]: "Saved" }));
-    } catch (e) {
-      setWishStatus((s) => ({ ...s, [bookId]: errorMessage(e) }));
-    }
-  }
-
-  function actions(bookId: number, mine: Mine | undefined) {
+  function actions(bookId: number, mine: MineStatus | undefined) {
     if (isSelf) return null;
-
-    if (mine === "reading") {
-      return <span className="muted">In your reading</span>;
-    }
-
-    const w = wishStatus[bookId];
-
-    let wishBtn: ReactNode;
-    if (mine === "read") wishBtn = <span className="muted">In your books</span>;
-    else if (mine === "wish") wishBtn = <span className="muted">In your wishlist</span>;
-    else if (w === "Saved") wishBtn = <span className="success-text">Saved</span>;
-    else if (w && w !== "Adding…") wishBtn = <span className="error-text">{w}</span>;
-    else
-      wishBtn = (
-        <button type="button" onClick={() => addWish(bookId)} disabled={w === "Adding…"}>
-          {w === "Adding…" ? (
-            "…"
-          ) : (
-            <>
-              <IconHeart /> Wishlist
-            </>
-          )}
-        </button>
-      );
-
-    return wishBtn;
+    return (
+      <StatusPicker
+        status={moved[bookId] ?? mine}
+        book={{ book_id: bookId }}
+        onChange={(next) => setMoved((m) => ({ ...m, [bookId]: next }))}
+      />
+    );
   }
 
   return (
@@ -334,7 +308,7 @@ export default function Profile({ username, me }: Props) {
           ) : reading.length === 0 ? (
             <div className="empty muted">
               {isSelf
-                ? 'Nothing here. Open a book and pick "Start reading" to track what you\'re on.'
+                ? 'Nothing here. Open a book and pick "Reading" to track what you\'re on.'
                 : `${username} isn't reading anything right now.`}
             </div>
           ) : (
@@ -536,8 +510,6 @@ export default function Profile({ username, me }: Props) {
   );
 }
 
-const DRAGGING = { scale: 1.02, zIndex: 10, boxShadow: "0 12px 28px rgba(0,0,0,0.15)" };
-
 function FormatPicker({
   listened,
   labels,
@@ -561,14 +533,6 @@ function FormatPicker({
         </button>
       ))}
     </div>
-  );
-}
-
-function RemoveButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button type="button" className="icon-btn remove" onClick={onClick} title="Remove" aria-label="Remove">
-      <IconX />
-    </button>
   );
 }
 
@@ -604,43 +568,6 @@ function BookSummary({
         {children}
       </div>
     </>
-  );
-}
-
-function SortableRow({
-  item,
-  rank,
-  className = "",
-  children,
-}: {
-  item: ListItem;
-  rank: number;
-  className?: string;
-  children: ReactNode;
-}) {
-  const controls = useDragControls();
-
-  return (
-    <Reorder.Item
-      value={item}
-      as="li"
-      dragListener={false}
-      dragControls={controls}
-      className={`book-row ${className}`}
-      whileDrag={DRAGGING}
-    >
-      <button
-        type="button"
-        className="drag-handle"
-        onPointerDown={(e) => controls.start(e)}
-        title="Drag to reorder"
-        aria-label="Drag to reorder"
-      >
-        <IconGrip size={18} />
-      </button>
-      <span className="rank">#{rank}</span>
-      {children}
-    </Reorder.Item>
   );
 }
 

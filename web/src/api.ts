@@ -8,6 +8,9 @@ export interface User {
   theme?: unknown; // validated by adoptAccountTheme
 }
 
+// Mirrors MineStatus in src/core/lists.ts.
+export type MineStatus = "read" | "wish" | "reading" | null;
+
 export interface ListItem {
   id: number;
   book_id: number;
@@ -19,7 +22,7 @@ export interface ListItem {
   manual: number;
   category_ids: number[];
   created_at: number;
-  mine?: "read" | "wish" | "reading" | null;
+  mine?: MineStatus;
 }
 
 export interface Book extends ListItem {
@@ -45,7 +48,7 @@ export interface SearchHit {
   year?: number;
   added?: boolean;
   bookId?: number;
-  mine?: "read" | "reading" | "wishlist";
+  mine?: MineStatus;
 }
 
 export interface WishlistItem extends ListItem {
@@ -63,7 +66,7 @@ export interface ReadingItem extends ListItem {
   listening: number;
 }
 
-interface ClubPick {
+export interface ClubPick {
   id: number;
   book_id: number;
   ol_key: string;
@@ -118,10 +121,21 @@ export interface ClubNomination {
   manual: number;
   user_id: number;
   nominatedBy: string;
-  votes: number;
   vetoed_by: number | null;
   vetoedBy: string | null;
+  eliminated: number;
   created_at: number;
+}
+
+export interface ClubResults {
+  voters: number;
+  nominations: (ClubNomination & {
+    points: number;
+    firsts: number;
+    seconds: number;
+    thirds: number;
+    mine: MineStatus;
+  })[];
 }
 
 export interface ClubDetailData {
@@ -137,9 +151,10 @@ export interface ClubDetailData {
   stage: ClubStage;
   members: ClubMember[];
   nominations: ClubNomination[];
-  myVote: number | null;
+  myBallot: number[];
+  votedCount: number;
   myVetoUsed: boolean;
-  currentPick: (ClubPick & { isReading: boolean }) | null;
+  currentPick: (ClubPick & { mine: MineStatus }) | null;
   pastPicks: ClubPick[];
 }
 
@@ -167,6 +182,15 @@ export function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+// A refused request, with whatever the server said besides the message.
+export class ApiError extends Error {
+  data: Record<string, unknown>;
+  constructor(message: string, data: Record<string, unknown>) {
+    super(message);
+    this.data = data;
+  }
+}
+
 export async function api<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -174,6 +198,6 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
     ...options,
   });
   const data: { error?: string } = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw new ApiError(data.error || `Request failed (${res.status})`, data);
   return data as T;
 }
