@@ -514,14 +514,22 @@ function BookSummary({
     <>
       <Cover url={book.cover_url} />
       <div className="info">
-        <div className="title">
-          <a href={`#/book/${book.book_id}`} className="book-title-link">
-            {book.title}
-          </a>
-          {book.manual ? <span className="badge">manual</span> : null}
-          {badge}
+        <div className="book-heading">
+          <div>
+            <div className="title">
+              <a href={`#/book/${book.book_id}`} className="book-title-link">
+                {book.title}
+              </a>
+            </div>
+            <Byline author={book.author} year={book.first_publish_year} />
+          </div>
+          {(book.manual || badge) && (
+            <div className="book-badges">
+              {book.manual ? <span className="badge">manual</span> : null}
+              {badge}
+            </div>
+          )}
         </div>
-        <Byline author={book.author} year={book.first_publish_year} />
         {overall ? <div className="small-label">#{overall} overall</div> : null}
         <CategoryTags categories={categories} ids={book.category_ids} onChange={onSetCategories} />
         {children}
@@ -564,7 +572,7 @@ function ReadItem({
   const [reviewOpen, setReviewOpen] = useState(false);
 
   return (
-    <SortableRow item={book} rank={rank} className="read-row">
+    <SortableRow item={book} rank={rank}>
       <BookSummary
         book={book}
         badge={reading && book.listened ? <span className="badge">Listened</span> : null}
@@ -572,7 +580,9 @@ function ReadItem({
         categories={categories}
         onSetCategories={onSetCategories}
       >
-        <div className="review-row">
+        <div className="toggle-row">
+          <span className="muted">Public</span>
+          <Switch checked={!!book.public} onChange={onTogglePublic} title="Visible to friends" />
           <button
             type="button"
             className={`review-toggle${reviewOpen ? " open" : ""}`}
@@ -596,18 +606,12 @@ function ReadItem({
           )}
         </div>
       </BookSummary>
-      <div className="read-status">
+      <div className="actions">
         <StatusPicker
           status={reading ? readingStatus(reading.listening, true) : readStatus(book.listened)}
           book={{ book_id: book.book_id }}
           onChange={onMoved}
         />
-      </div>
-      <div className="actions">
-        <div className="public-col">
-          <Switch checked={!!book.public} onChange={onTogglePublic} title="Visible to friends" />
-          <span className="small-label">{book.public ? "Public" : "Private"}</span>
-        </div>
         <RemoveButton onClick={onRemove} />
       </div>
     </SortableRow>

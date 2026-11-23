@@ -135,7 +135,7 @@ export function StatusPicker({
                 onClick={() => (current ? swap && pick(swap) : pick(option))}
               >
                 <OptionIcon />
-                {current && shown.label}
+                {current && <span className="status-label">{shown.label}</span>}
                 {swap && <IconSwap size={12} />}
               </button>
             </Tooltip>
