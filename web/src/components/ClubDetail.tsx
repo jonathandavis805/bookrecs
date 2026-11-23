@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ApiError,
   api,
   type ClubDetailData,
   type ClubMember,
@@ -10,9 +11,12 @@ import {
   type User,
 } from "../api";
 import { useBookSearch } from "../useBookSearch";
+import { ClubBallot, MAX_RANKED } from "./ClubBallot";
+import { ClubResults } from "./ClubResults";
 import { Byline, Cover } from "./ui/Book";
-import { IconCheck, IconChevronLeft, IconClock, IconThumbsDown, IconThumbsUp, IconX } from "./ui/icons";
+import { IconChevronLeft, IconClock, IconThumbsDown, IconThumbsUp, IconX } from "./ui/icons";
 import { ConfirmDialog, Modal } from "./ui/Modal";
+import { StatusPicker } from "./ui/StatusPicker";
 
 function goBackToClubs() {
   // Arrived from inside the app (the clubs list)? Go back so the browser
@@ -35,19 +39,8 @@ function BackToClubs() {
   );
 }
 
-// The runoff field: the top two vote-getters. A tie at the top keeps all
-// tied leaders; a single leader is joined by whoever ties for second.
-// Mirrors runoffField in src/core/clubs.ts.
-function runoffField<T extends { votes: number }>(nominations: T[]): T[] {
-  if (nominations.length === 0) return [];
-  const topVotes = Math.max(...nominations.map((n) => n.votes));
-  const leaders = nominations.filter((n) => n.votes === topVotes);
-  if (leaders.length > 1) return leaders;
-  const rest = nominations.filter((n) => n.votes < topVotes);
-  if (rest.length === 0) return leaders;
-  const runnerUpVotes = Math.max(...rest.map((n) => n.votes));
-  return [...leaders, ...rest.filter((n) => n.votes === runnerUpVotes)];
-}
+const MAX_NOMINATIONS = 3;
+const PLACES = ["1st", "2nd", "3rd"];
 
 export default function ClubDetail({ user, clubId }: { user: User; clubId: number }) {
   const [data, setData] = useState<ClubDetailData | null>(null);
@@ -65,7 +58,10 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const [vetoBusy, setVetoBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<ClubNomination | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
-  const [showRunoff, setShowRunoff] = useState(false);
+  const [runoffTitles, setRunoffTitles] = useState<string[] | null>(null);
+  // An edited ballot that hasn't been saved yet.
+  const [draft, setDraft] = useState<number[] | null>(null);
+  const ballotSaves = useRef(0);
   const [runoffBusy, setRunoffBusy] = useState(false);
   const [showResetVote, setShowResetVote] = useState(false);
 
@@ -167,21 +163,16 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   const voting = data.stage === "voting" || runoff;
   const transferCandidates = data.members.filter((m) => m.status === "accepted" && m.role !== "owner");
   const activeNominations = data.nominations.filter((n) => n.vetoed_by == null);
-  // A tie at the top (books sharing the lead with at least one vote).
-  const topVotes = activeNominations.reduce((m, n) => Math.max(m, n.votes), 0);
-  const tiedNominations = topVotes > 0 ? activeNominations.filter((n) => n.votes === topVotes) : [];
-  // A pick needs a simple majority (more than half the votes cast); anything
-  // else goes to a runoff among the top two, ties included.
-  const totalVotes = activeNominations.reduce((s, n) => s + n.votes, 0);
-  const hasMajority = tiedNominations.length === 1 && tiedNominations[0].votes * 2 > totalVotes;
-  const needsRunoff = totalVotes > 0 && !hasMajority;
-  const runoffNominations = runoffField(activeNominations);
-  // Live order: most votes first (tied books hold their nomination order —
-  // they only move when a count actually changes), vetoed nominations sink
-  // to the bottom.
-  const sortedNominations = [...activeNominations]
-    .sort((a, b) => b.votes - a.votes || a.created_at - b.created_at || a.id - b.id)
-    .concat(data.nominations.filter((n) => n.vetoed_by != null));
+  const inPlay = activeNominations.filter((n) => !n.eliminated);
+  const memberCount = data.members.filter((m) => m.status === "accepted").length;
+  const myNominations = data.nominations.filter((n) => n.user_id === user.id).length;
+  const ballot = draft ?? data.myBallot;
+  // Nomination order, which holds still while you rank; books out of the running sink.
+  const sortedNominations = [
+    ...inPlay,
+    ...activeNominations.filter((n) => n.eliminated),
+    ...data.nominations.filter((n) => n.vetoed_by != null),
+  ];
 
   async function act(fn: () => Promise<unknown>, message?: string) {
     setError("");
@@ -195,17 +186,22 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
     }
   }
 
-  async function vote(nominationId: number) {
-    await act(() =>
-      api(`/api/clubs/${clubId}/vote`, {
+  // The draft stays up until the last save lands, so live updates can't undo newer edits.
+  async function saveBallot(next: number[]) {
+    setDraft(next);
+    setError("");
+    const save = ++ballotSaves.current;
+    try {
+      const d = await api<{ club: ClubDetailData }>(`/api/clubs/${clubId}/vote`, {
         method: "POST",
-        body: JSON.stringify({ nominationId }),
-      }),
-    );
-  }
-
-  async function unvote() {
-    await act(() => api(`/api/clubs/${clubId}/vote`, { method: "DELETE" }));
+        body: JSON.stringify({ ballot: next }),
+      });
+      if (save === ballotSaves.current) setData(d.club);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      if (save === ballotSaves.current) setDraft(null);
+    }
   }
 
   async function veto() {
@@ -240,21 +236,25 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
   }
 
   async function closeVote() {
-    // No majority (a tie or a narrow lead) needs a runoff — offer it
-    // instead of failing.
-    if (needsRunoff) {
-      setShowRunoff(true);
-      return;
+    setError("");
+    setInfo("");
+    try {
+      await api(`/api/clubs/${clubId}/close-vote`, { method: "POST" });
+      setInfo("Vote closed — winner picked.");
+      await load();
+    } catch (e) {
+      // Only a tie can't be closed outright — offer the runoff that settles it.
+      if (e instanceof ApiError && Array.isArray(e.data.runoffTitles)) setRunoffTitles(e.data.runoffTitles);
+      else setError(errorMessage(e));
     }
-    await act(() => api(`/api/clubs/${clubId}/close-vote`, { method: "POST" }), "Vote closed — winner picked.");
   }
 
   async function startRunoff() {
     setRunoffBusy(true);
     try {
       await api(`/api/clubs/${clubId}/runoff`, { method: "POST" });
-      setShowRunoff(false);
-      setInfo("Runoff started — votes reset for the runoff books.");
+      setRunoffTitles(null);
+      setInfo("Runoff started — everyone votes again between the tied books.");
       await load();
     } catch (e) {
       setError(errorMessage(e));
@@ -354,7 +354,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       {error && <div className="error">{error}</div>}
       {info && <div className="success">{info}</div>}
 
-      {data.currentPick && <CurrentPick pick={data.currentPick} onStarted={load} />}
+      {data.currentPick && <CurrentPick pick={data.currentPick} onMoved={load} />}
 
       <section className="club-section">
         <h3 className="section-title">
@@ -362,7 +362,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         </h3>
         {!voting && !nominating && (
           <div className="club-closed-row">
-            <span className="muted">Voting is closed. The winner is shown above as the current read.</span>
+            <span className="muted">Voting is closed. The winner is the current read; the full results are below.</span>
             {isOwner && (
               <button type="button" className="btn-primary" onClick={openNominations}>
                 Start nominations
@@ -391,7 +391,13 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
               </div>
             )}
 
-            <NominatePane clubId={clubId} onNominated={load} />
+            {myNominations < MAX_NOMINATIONS ? (
+              <NominatePane clubId={clubId} onNominated={load} />
+            ) : (
+              <div className="empty club-nominate">
+                You've used all {MAX_NOMINATIONS} of your nominations. Withdraw one to swap it.
+              </div>
+            )}
 
             {data.nominations.length === 0 ? (
               <div className="empty">No nominations yet — suggest the first book.</div>
@@ -402,12 +408,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                     key={n.id}
                     n={n}
                     voting={false}
-                    myVote={false}
-                    canVeto={false}
-                    isOwner={isOwner}
-                    onVote={() => {}}
-                    onUnvote={() => {}}
-                    onVeto={() => {}}
+                    canRemove={isOwner || (n.user_id === user.id && n.vetoed_by == null)}
                     onRemove={() => setRemoveTarget(n)}
                   />
                 ))}
@@ -415,7 +416,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
             )}
 
             <div className="muted club-myvote-note">
-              Nominations are open — the owner starts the vote once the field is set.
+              {Math.min(myNominations, MAX_NOMINATIONS)} of your {MAX_NOMINATIONS} nominations used. The owner starts
+              the vote once the field is set.
             </div>
           </>
         )}
@@ -428,17 +430,15 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                   type="button"
                   className="btn-primary"
                   onClick={closeVote}
-                  disabled={activeNominations.length === 0 || activeNominations.every((n) => n.votes === 0)}
+                  disabled={inPlay.length === 0 || data.votedCount === 0}
                   title={
                     activeNominations.length === 0
                       ? data.nominations.length > 0
                         ? "Every nomination was vetoed"
                         : "Nominate at least one book first"
-                      : needsRunoff
-                        ? "No majority yet — a runoff will resolve it"
-                        : activeNominations.every((n) => n.votes === 0)
-                          ? "Waiting for votes"
-                          : "Majority wins"
+                      : data.votedCount === 0
+                        ? "Waiting for votes"
+                        : "Most points wins"
                   }
                 >
                   {runoff ? "Close runoff & pick winner" : "Close voting & pick winner"}
@@ -458,13 +458,23 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
               <div className="club-runoff-banner">
                 <IconClock size={18} />
                 <span>
-                  <strong>Runoff</strong> — {activeNominations.map((n) => `"${n.title}"`).join(" vs ")}. Votes were
-                  reset; cast yours again to break the tie.
+                  <strong>Runoff</strong> — {inPlay.map((n) => `"${n.title}"`).join(" vs ")}. Vote again between these
+                  to break the tie.
                 </span>
               </div>
             )}
 
-            <div className="muted club-myvote-note">Nominations are closed while voting is open.</div>
+            <p className="muted results-note">
+              Rank up to three books, best first. Points stay hidden until voting closes. {data.votedCount} of{" "}
+              {memberCount} {memberCount === 1 ? "member has" : "members have"} voted.
+            </p>
+            <ClubBallot
+              ballot={ballot}
+              nominations={data.nominations}
+              onReorder={setDraft}
+              onDrop={() => draft && saveBallot(draft)}
+              onRemove={(id) => saveBallot(ballot.filter((x) => x !== id))}
+            />
 
             {data.nominations.length === 0 ? (
               <div className="empty">No nominations yet — suggest the first book.</div>
@@ -475,11 +485,13 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
                     key={n.id}
                     n={n}
                     voting
-                    myVote={data.myVote === n.id}
-                    canVeto={!data.myVetoUsed && n.vetoed_by == null}
-                    isOwner={isOwner}
-                    onVote={() => vote(n.id)}
-                    onUnvote={unvote}
+                    place={ballot.indexOf(n.id)}
+                    ballotFull={ballot.length >= MAX_RANKED}
+                    canVeto={!data.myVetoUsed}
+                    canRemove={isOwner && !n.eliminated}
+                    onVote={() =>
+                      saveBallot(ballot.includes(n.id) ? ballot.filter((x) => x !== n.id) : [...ballot, n.id])
+                    }
                     onVeto={() => setVetoTarget(n)}
                     onRemove={() => setRemoveTarget(n)}
                   />
@@ -487,14 +499,6 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
               </motion.ul>
             )}
 
-            {data.myVote != null && (
-              <div className="muted club-myvote-note">
-                You have one vote — tapping another book moves it.{" "}
-                <button type="button" className="link" onClick={unvote}>
-                  Remove my vote
-                </button>
-              </div>
-            )}
             <div className="muted club-myvote-note">
               {data.myVetoUsed
                 ? "You've used your veto for this vote."
@@ -504,8 +508,12 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         )}
       </section>
 
+      {data.currentPick && (
+        <ClubResults clubId={clubId} current={data.currentPick} past={data.pastPicks} onMoved={load} />
+      )}
+
       <section className="club-section">
-        <h3 className="section-title">Members ({data.members.filter((m) => m.status === "accepted").length})</h3>
+        <h3 className="section-title">Members ({memberCount})</h3>
         <MembersPane
           data={data}
           userId={user.id}
@@ -617,20 +625,17 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         </Modal>
       )}
 
-      {showRunoff && (
+      {runoffTitles && (
         <ConfirmDialog
-          title={tiedNominations.length > 1 ? "It's a tie" : "No majority yet"}
+          title="It's a tie"
           confirmLabel="Start runoff"
           busyLabel="Starting…"
           busy={runoffBusy}
           onConfirm={startRunoff}
-          onCancel={() => setShowRunoff(false)}
+          onCancel={() => setRunoffTitles(null)}
         >
-          {tiedNominations.length > 1
-            ? `${tiedNominations.map((n) => `"${n.title}"`).join(" and ")} are tied at ${topVotes} ${topVotes === 1 ? "vote" : "votes"} each.`
-            : `"${tiedNominations[0]?.title}" leads with ${topVotes} of ${totalVotes} votes — short of a majority.`}{" "}
-          Start a runoff between {runoffNominations.map((n) => `"${n.title}"`).join(" and ")}? The other nominations are
-          dropped, votes reset, and everyone votes again between just these books.
+          {runoffTitles.map((t) => `"${t}"`).join(" and ")} are tied. Start a runoff? Everyone votes again between just
+          these books.
         </ConfirmDialog>
       )}
 
@@ -656,8 +661,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
           onConfirm={veto}
           onCancel={() => setVetoTarget(null)}
         >
-          Veto "{vetoTarget.title}"? It's struck from this vote and any votes for it are released. You only get one veto
-          per vote, and this can't be undone.
+          Veto "{vetoTarget.title}"? It's struck from this vote and ballots ranking it move their later choices up. You
+          only get one veto per vote, and this can't be undone.
         </ConfirmDialog>
       )}
 
@@ -671,8 +676,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
           onConfirm={removeNomination}
           onCancel={() => setRemoveTarget(null)}
         >
-          Remove "{removeTarget.title}" from the vote? It leaves the list entirely — any votes for it are released, and
-          it can be nominated again like new. For accidents; use your veto to block a book you oppose.
+          Remove "{removeTarget.title}" from the vote? It leaves the list entirely, along with any votes for it, and can
+          be nominated again like new.
         </ConfirmDialog>
       )}
 
@@ -735,7 +740,11 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
                     {h.title}
                     {h.mine && (
                       <span className="badge">
-                        {h.mine === "reading" ? "Reading" : h.mine === "wishlist" ? "Wishlist" : "Read"}
+                        {h.mine === "reading" || h.mine === "rereading"
+                          ? "Reading"
+                          : h.mine === "wish"
+                            ? "Wishlist"
+                            : "Read"}
                       </span>
                     )}
                   </div>
@@ -766,53 +775,56 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
 function NominationRow({
   n,
   voting,
-  myVote,
-  canVeto,
-  isOwner,
+  place = -1,
+  ballotFull = false,
+  canVeto = false,
+  canRemove,
   onVote,
-  onUnvote,
   onVeto,
   onRemove,
 }: {
   n: ClubNomination;
   voting: boolean;
-  myVote: boolean;
-  canVeto: boolean;
-  isOwner: boolean;
-  onVote: () => void;
-  onUnvote: () => void;
-  onVeto: () => void;
+  place?: number;
+  ballotFull?: boolean;
+  canVeto?: boolean;
+  canRemove: boolean;
+  onVote?: () => void;
+  onVeto?: () => void;
   onRemove: () => void;
 }) {
   const vetoed = n.vetoed_by != null;
+  const ranked = place !== -1;
+  const voteLabel = ranked ? "Remove from your ballot" : ballotFull ? "Your ballot is full" : "Add to your ballot";
   return (
     <motion.li
       layout
       transition={{ type: "spring", stiffness: 500, damping: 40 }}
-      className={`book-row club-book-row${myVote ? " my-vote" : ""}${vetoed ? " vetoed" : ""}`}
+      className={`book-row club-book-row${ranked ? " my-vote" : ""}${vetoed || n.eliminated ? " vetoed" : ""}`}
     >
       <Cover url={n.cover_url} />
       <div className="info">
         <div className="title">
           {n.title}
-          {myVote && <span className="badge accent">Your vote</span>}
+          {ranked && <span className="badge accent">Your {PLACES[place]}</span>}
           {vetoed && <span className="badge danger">Vetoed by {n.vetoedBy ?? "a member"}</span>}
+          {!vetoed && !!n.eliminated && <span className="badge">Not in the runoff</span>}
         </div>
         <Byline author={n.author} year={n.first_publish_year} extra={`nominated by ${n.nominatedBy}`} />
       </div>
       <div className="actions">
-        {!vetoed && voting && (
+        {!vetoed && !n.eliminated && voting && (
           <>
             <button
               type="button"
-              className={`btn-secondary vote-btn${myVote ? " on" : ""}`}
-              onClick={myVote ? onUnvote : onVote}
-              title={myVote ? "Remove your vote" : "Vote for this book"}
-              aria-label={`Vote for ${n.title}, ${n.votes} vote${n.votes === 1 ? "" : "s"}`}
-              aria-pressed={myVote}
+              className={`btn-secondary vote-btn${ranked ? " on" : ""}`}
+              onClick={onVote}
+              disabled={ballotFull && !ranked}
+              title={voteLabel}
+              aria-label={`${voteLabel}: ${n.title}`}
+              aria-pressed={ranked}
             >
               <IconThumbsUp />
-              {n.votes}
             </button>
             {canVeto && (
               <button
@@ -827,12 +839,12 @@ function NominationRow({
             )}
           </>
         )}
-        {isOwner && (
+        {canRemove && (
           <button
             type="button"
             className="icon-btn remove"
             onClick={onRemove}
-            title={vetoed ? "Remove this entry entirely" : "Remove from vote (accidental nomination)"}
+            title="Remove from the vote"
             aria-label="Remove nomination"
           >
             <IconX size={14} />
@@ -845,30 +857,11 @@ function NominationRow({
 
 function CurrentPick({
   pick,
-  onStarted,
+  onMoved,
 }: {
   pick: NonNullable<ClubDetailData["currentPick"]>;
-  onStarted: () => Promise<void>;
+  onMoved: () => Promise<void>;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function startReading() {
-    setBusy(true);
-    setError("");
-    try {
-      await api("/api/me/reading", {
-        method: "POST",
-        body: JSON.stringify({ book_id: pick.book_id }),
-      });
-      await onStarted();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <section className="card">
       <h3 className="section-title">Current read</h3>
@@ -881,18 +874,9 @@ function CurrentPick({
             </a>
           </div>
           <Byline author={pick.author} year={pick.first_publish_year} />
-          <div className="actions">
-            {pick.isReading ? (
-              <button type="button" disabled>
-                <IconCheck /> Reading
-              </button>
-            ) : (
-              <button type="button" onClick={startReading} disabled={busy}>
-                {busy ? "Adding…" : "Start reading"}
-              </button>
-            )}
-          </div>
-          {error && <div className="error-text">{error}</div>}
+        </div>
+        <div className="actions">
+          <StatusPicker status={pick.mine} book={{ book_id: pick.book_id }} onChange={() => onMoved()} />
         </div>
       </div>
     </section>

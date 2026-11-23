@@ -15,8 +15,8 @@ title to see its **detail page** with synopsis, your lists and review, and
 friends' activity and reviews.
 
 Start a **book club** with a group of friends: nominate books from Open
-Library, vote for the next read (one vote per member, changeable until the vote
-closes), and the winning pick becomes the club's **current read** — with the
+Library (three each), rank your top three for the next read (changeable until the
+vote closes), and the winning pick becomes the club's **current read** — with the
 full pick history kept. Clubs are invite-only among friends.
 
 Runs on **Cloudflare Workers** + **D1** + **Pages**.
@@ -181,6 +181,7 @@ answer with the updated club detail (`{club}`).
 | PATCH  | `/api/me/books/:id`                        | update `{review?}`, `{rank?}`                                                                     |
 | POST   | `/api/me/books/:id/public`                 | `{public}` set a book public/private                                                              |
 | DELETE | `/api/me/books/:id`                        | remove                                                                                            |
+| POST   | `/api/me/status`                           | `{status: reading/wish/read, book_id?, ol_key?, year?}` put a book on a list, moving it if needed |
 | GET    | `/api/me/wishlist`                         | your wishlist (each item: `owned`, `public`)                                                      |
 | POST   | `/api/me/wishlist`                         | add `{ol_key?, book_id?, owned?, public?, rank?}` (book_id = someone else's book)                 |
 | POST   | `/api/me/wishlist/manual`                  | add by hand `{title, author?, year?, coverUrl?, owned?, public?, rank?}`                          |
@@ -207,20 +208,20 @@ answer with the updated club detail (`{club}`).
 | DELETE | `/api/friends/:id`                         | unfriend                                                                                          |
 | POST   | `/api/clubs`                               | create `{name, description?, usernames?[]}` (invitees must be friends)                            |
 | GET    | `/api/clubs`                               | your clubs + pending invites                                                                      |
-| GET    | `/api/clubs/:id`                           | club detail: members, nominations (with counts), your vote, current + past picks                  |
+| GET    | `/api/clubs/:id`                           | club detail: members, nominations, your ballot, how many voted, current + past picks              |
 | GET    | `/api/clubs/:id/events`                    | live club detail over Server-Sent Events (single `data:` per change; `gone` event on access loss) |
 | POST   | `/api/clubs/:id/invite`                    | `{username}` invite a friend (members only)                                                       |
 | POST   | `/api/clubs/:id/respond`                   | `{accept}` accept/decline your invite                                                             |
-| POST   | `/api/clubs/:id/nominate`                  | `{ol_key?, book_id?, year?}` nominate a book (nomination stage only)                              |
-| POST   | `/api/clubs/:id/vote`                      | `{nominationId}` cast/move your one vote (voting stage only)                                      |
+| POST   | `/api/clubs/:id/nominate`                  | `{ol_key?, book_id?, year?}` nominate a book (nomination stage only, three each)                  |
+| POST   | `/api/clubs/:id/vote`                      | `{ballot: [nominationIds]}` replace your ballot, first choice first, up to three                  |
 | POST   | `/api/clubs/:id/veto`                      | `{nominationId}` strike a nomination (one veto per member per vote)                               |
-| DELETE | `/api/clubs/:id/nominations/:nominationId` | owner: remove a nomination (accidental adds)                                                      |
-| DELETE | `/api/clubs/:id/vote`                      | remove your vote                                                                                  |
+| DELETE | `/api/clubs/:id/nominations/:nominationId` | owner: remove a nomination; members: withdraw their own while nominating                          |
+| GET    | `/api/clubs/:id/results/:pickId`           | a closed round: every nomination with points, places and your list status (`mine`)                |
 | POST   | `/api/clubs/:id/open-nominations`          | owner: start a new cycle in the nomination stage                                                  |
 | POST   | `/api/clubs/:id/start-voting`              | owner: lock nominations and open the vote                                                         |
 | POST   | `/api/clubs/:id/back-to-nominations`       | owner: clear all votes and return to the nomination stage                                         |
-| POST   | `/api/clubs/:id/close-vote`                | owner: a simple majority wins (otherwise a runoff is offered)                                     |
-| POST   | `/api/clubs/:id/runoff`                    | owner: revote among the top two vote-getters (ties included)                                      |
+| POST   | `/api/clubs/:id/close-vote`                | owner: most points wins (a full tie answers with `runoffTitles`)                                  |
+| POST   | `/api/clubs/:id/runoff`                    | owner: revote among the tied books                                                                |
 | DELETE | `/api/clubs/:id/members/:userId`           | owner: remove a member / cancel invite                                                            |
 | POST   | `/api/clubs/:id/leave`                     | member: leave the club                                                                            |
 | POST   | `/api/clubs/:id/transfer`                  | owner: `{userId}` transfer ownership to a member and leave                                        |
@@ -248,26 +249,24 @@ answer with the updated club detail (`{club}`).
   its most common English edition instead ("The Brothers Karamazov").
 - **Book clubs** live under the Clubs tab. The owner creates a club and invites
   friends (anyone in the club can invite their own friends). Each cycle has two
-  owner-controlled stages: a **nomination stage** (members suggest books from
-  their own lists or Open Library) and a **voting stage** (nominations lock,
-  each member casts one vote — you can move or remove it). The owner can reset
+  owner-controlled stages: a **nomination stage** (members suggest up to three
+  books each from their own lists or Open Library, and can withdraw them) and a
+  **voting stage** (nominations lock, each member ranks up to three books worth
+  3, 2 and 1 points; points stay hidden until the vote closes). The owner can reset
   the vote and return to nominations at any time, clearing all cast votes.
-  The owner closes the vote; a book needs a
-  simple majority (more than half the votes cast) to win, and it becomes the club's
-  current read with a one-tap "Start reading" into your personal list. The
-  owner can then start a new cycle; past picks are kept on the club page.
+  The owner closes the vote; the book with the most points wins (then most first
+  choices, then most second choices) and becomes the club's current read. The
+  owner can then start a new cycle; every closed round's results are kept on the
+  club page, with a status picker to add any nominated book to your lists.
   Open club pages live-update over Server-Sent Events (`/api/clubs/:id/events`
   pushes the detail within ~half a second of a change) with an automatic
-  5s-polling fallback when the stream can't connect. Nominations are ordered
-  by live vote count with animated reordering (tied books hold their
-  nomination order until a count actually changes), and each member gets one
-  veto per vote: a vetoed nomination is struck (votes on it are released, it
-  can't win). Closing a vote without a majority offers a runoff instead of an
-  arbitrary winner: the also-rans drop, votes reset, and the club votes again
-  between the top two vote-getters (all books tied at the top stay in). The owner can also remove an accidentally
+  5s-polling fallback when the stream can't connect. Each member gets one
+  veto per vote: a vetoed nomination is struck (it can't win, and ballots ranking
+  it move their later choices up). Closing a vote on a full tie offers a runoff
+  between the tied books. The owner can also remove an accidentally
   nominated book from the vote (members can re-nominate it fresh). Owners
   who want out must transfer ownership to a member or delete the club.
-- Starting a book is one tap: every book on a friend's profile has a "📖 Reading"
-  quick action (plus "♡ Wishlist"), and your own wishlist items have a
-  "📖 Reading" button to start reading them.
+- A status picker (Reading, Wishlist, Read) shows which of your lists a book is on
+  and moves it: on your own lists, friends' books, book pages, search results and club
+  results. A book you've read can also be read again, which lights up both.
 - Database migrations are in `migrations/`, applied with `wrangler d1 migrations apply`: `bun run migrate:local` for local dev, and `bun run migrate:remote` (run by CI on deploy) for production.

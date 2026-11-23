@@ -175,7 +175,7 @@ async function vote(ctx: Ctx, clubId: number, bookTitlePattern: string): Promise
     `/api/clubs/${clubId}/vote`,
     {
       method: "POST",
-      body: JSON.stringify({ nominationId: nom.id }),
+      body: JSON.stringify({ ballot: [nom.id] }),
     },
     ctx.cookie,
   );

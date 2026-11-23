@@ -123,6 +123,7 @@ async function handleBookSearch(db: D1Database, user: core.User, url: URL): Prom
   const mineResults = mine.map(({ list, ...m }) => ({ ...m, added: true, mine: list }));
   try {
     const results = await searchBooks(q);
+    const status = await core.viewerOwnership(db, user.id);
     const existing = await core.getExistingBookKeys(
       db,
       results.map((r) => r.key),
@@ -137,7 +138,7 @@ async function handleBookSearch(db: D1Database, user: core.User, url: URL): Prom
     const olResults = results
       .sort((a, b) => rank(a) - rank(b))
       .filter((r) => !mineKeys.has(r.key) && !mineTitles.has(normalizeTitle(r.title)))
-      .map((r) => ({ ...r, added: existing.has(r.key) }));
+      .map((r) => ({ ...r, added: existing.has(r.key), mine: status(existing.get(r.key) ?? 0) }));
     return json({ results: [...mineResults, ...olResults] });
   } catch (e) {
     // Open Library is down, but the user's own matches are still useful.
@@ -205,7 +206,7 @@ function clubEvents(db: D1Database, req: Request, userId: number, clubId: number
       // server-side close below.
       send("retry: 2000\n\n");
       send(`data: ${JSON.stringify({ club: initial })}\n\n`);
-      // Half-second change checks keep vote counts effectively real-time.
+      // Half-second change checks keep the page effectively real-time.
       // The lifetime keeps version checks within the Workers subrequest
       // budget; the EventSource reconnects automatically (the client's
       // poll fallback covers the brief gap).
@@ -367,6 +368,14 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
   if (readMatch && method === "DELETE") {
     await core.removeRead(db, user.id, Number(readMatch[1]));
     return json({ books: await core.listReads(db, user.id) });
+  }
+
+  if (path === "/api/me/status" && method === "POST") {
+    const { status, book_id, ol_key, year } = await readBody(req);
+    if (status !== "reading" && status !== "wish" && status !== "read") return json({ error: "Invalid status" }, 400);
+    const ref = { bookId: optionalNumber(book_id), olKey: ol_key, year: optionalNumber(year) };
+    const r = await core.setStatus(db, user.id, ref, status);
+    return r.ok ? json({ book: r.book, mine: r.mine }) : failure(r);
   }
 
   const visibility = path.match(/^\/api\/me\/(books|wishlist)\/(\d+)\/public$/);
@@ -558,6 +567,10 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
       const r = await core.getClub(db, user.id, clubId);
       return r.ok ? json({ club: r.club }) : failure(r);
     }
+    if (action === "GET results/:id") {
+      const r = await core.getClubResults(db, user.id, clubId, targetId);
+      return r.ok ? json({ results: { voters: r.voters, nominations: r.nominations } }) : failure(r);
+    }
     if (action === "GET events") {
       // Must be a member before we hold a stream open for them.
       const r = await core.getClub(db, user.id, clubId);
@@ -586,8 +599,7 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
           bookId: optionalNumber(body.book_id),
           year: optionalNumber(body.year),
         }),
-      "POST vote": () => core.voteForNomination(db, user.id, clubId, Number(body.nominationId)),
-      "DELETE vote": () => core.removeVote(db, user.id, clubId),
+      "POST vote": () => core.castBallot(db, user.id, clubId, idList(body.ballot)),
       "POST veto": () => core.vetoNomination(db, user.id, clubId, Number(body.nominationId)),
       "POST runoff": () => core.startRunoff(db, user.id, clubId),
       "POST open-nominations": () => core.openNominations(db, user.id, clubId),

@@ -66,13 +66,6 @@ export const IconHeart = (p: IconProps) => (
   </Icon>
 );
 
-export const IconUndo = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M9 14 4 9l5-5" />
-    <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
-  </Icon>
-);
-
 export const IconGrip = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="9" cy="5" r="1" />

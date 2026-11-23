@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type Book, errorMessage } from "../api";
+import { api, type Book, errorMessage, type MineStatus } from "../api";
 import { Byline } from "./ui/Book";
-import { IconBook, IconCheck, IconHeart } from "./ui/icons";
+import { IconBook, IconHeart } from "./ui/icons";
+import { StatusPicker } from "./ui/StatusPicker";
 
 interface FriendActivity {
   username: string;
@@ -87,13 +88,15 @@ export default function BookDetail({ bookId }: { bookId: number }) {
   }
 
   const { mine } = book;
-  const onAnyList = mine.read || mine.wishlist || mine.reading;
-  const canStart = !mine.reading;
-  // The server keeps books you've read off the wishlist.
-  const canWish = !mine.read && !mine.wishlist;
-  const finishPath = mine.reading
-    ? `/api/me/reading/${book.id}/finish`
-    : mine.wishlist && `/api/me/wishlist/${book.id}/move-to-read`;
+  const status: MineStatus = mine.reading
+    ? mine.read
+      ? "rereading"
+      : "reading"
+    : mine.read
+      ? "read"
+      : mine.wishlist
+        ? "wish"
+        : null;
   const reviewDirty = review !== (mine.read?.review ?? "");
   const friends = new Map<string, FriendActivity[]>();
   for (const f of book.friends) friends.set(f.username, [...(friends.get(f.username) ?? []), f]);
@@ -152,60 +155,19 @@ export default function BookDetail({ bookId }: { bookId: number }) {
             </div>
             <Byline author={book.author} year={book.first_publish_year} />
             <div className="my-lists">
+              <StatusPicker
+                status={status}
+                book={{ book_id: book.id }}
+                onChange={() => refresh().catch((e) => setActionError(errorMessage(e)))}
+              />
               {mine.read && (
                 <span className="badge accent">
                   Read #{mine.read.rank}
                   {mine.read.listened ? " · Listened" : ""}
                 </span>
               )}
-              {mine.reading && (
-                <span className="badge accent">
-                  <IconBook size={12} /> {mine.reading.listening ? "Listening" : "Reading"}
-                </span>
-              )}
-              {mine.wishlist && <WishlistBadge owned={!!mine.wishlist.owned} />}
-              {!onAnyList && <span className="muted">Not on your lists yet</span>}
-            </div>
-            <div className="my-list-actions">
-              {canStart && (
-                <button
-                  type="button"
-                  className="btn-secondary btn-sm"
-                  disabled={busy}
-                  onClick={() =>
-                    mine.wishlist
-                      ? act("/api/me/reading/from-wishlist", "POST", { book_id: book.id })
-                      : act("/api/me/reading", "POST", { book_id: book.id })
-                  }
-                >
-                  <IconBook /> {mine.read ? "Read again" : "Start reading"}
-                </button>
-              )}
-              {finishPath && (
-                <button
-                  type="button"
-                  className="btn-secondary btn-sm"
-                  disabled={busy}
-                  title="Finished — move to Books read"
-                  onClick={() => act(finishPath, "POST", {})}
-                >
-                  <IconCheck /> Finished
-                </button>
-              )}
-              {canWish && (
-                <button
-                  type="button"
-                  className="btn-secondary btn-sm"
-                  disabled={busy}
-                  onClick={() =>
-                    mine.reading
-                      ? act(`/api/me/reading/${book.id}/back-to-wishlist`, "POST", {})
-                      : act("/api/me/wishlist", "POST", { book_id: book.id })
-                  }
-                >
-                  <IconHeart /> {mine.reading ? "Move to wishlist" : "Add to wishlist"}
-                </button>
-              )}
+              {mine.reading?.listening ? <span className="badge accent">Listening</span> : null}
+              {mine.wishlist?.owned ? <WishlistBadge owned /> : null}
             </div>
             {actionError && <div className="error-text">{actionError}</div>}
           </div>

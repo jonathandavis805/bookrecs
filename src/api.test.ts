@@ -158,6 +158,44 @@ describe("ranked lists", () => {
   });
 });
 
+describe("status", () => {
+  test("setting a status moves a book between lists", async () => {
+    const alice = await signup("alice");
+    const bob = await signup("bob");
+    const book_id = (await bob.post("/api/books/manual", manual("Dune"))).data.book.id;
+    const set = (status: string) => alice.post("/api/me/status", { book_id, status });
+    const lists = async () => {
+      const { mine } = (await alice.get(`/api/books/${book_id}`)).data.book;
+      return Object.keys(mine).filter((list) => mine[list]);
+    };
+
+    for (const [status, list] of [
+      ["wish", "wishlist"],
+      ["reading", "reading"],
+      ["wish", "wishlist"],
+      ["read", "read"],
+    ]) {
+      expect((await set(status)).data.mine).toBe(status);
+      expect(await lists()).toEqual([list]);
+    }
+    expect((await set("wish")).status).toBe(400);
+    expect((await set("reading")).data.mine).toBe("rereading");
+    expect(await lists()).toEqual(["read", "reading"]);
+    expect((await set("wish")).status).toBe(400);
+    expect((await set("read")).data.mine).toBe("read");
+    expect(await lists()).toEqual(["read"]);
+    expect((await set("owned")).status).toBe(400);
+  });
+
+  test("the book limit applies to books marked read", async () => {
+    const alice = await signup("alice");
+    const bob = await signup("bob");
+    const book_id = (await bob.post("/api/books/manual", manual("Dune"))).data.book.id;
+    for (let i = 0; i < 25; i++) await alice.post("/api/books/manual", manual(`B${i}`));
+    expect((await alice.post("/api/me/status", { book_id, status: "read" })).status).toBe(400);
+  });
+});
+
 describe("categories", () => {
   async function shelf() {
     const alice = await signup("alice");
@@ -381,49 +419,120 @@ describe("clubs", () => {
     return (await user.get(`/api/clubs/${clubId}`)).data.club.nominations as { id: number; title: string }[];
   }
 
-  test("a majority closes the vote and becomes the current pick", async () => {
-    const { alice, bob, carol, clubId, books } = await clubWithMembers();
-    for (const id of books.slice(0, 2)) await alice.post(`/api/clubs/${clubId}/nominate`, { book_id: id });
-    await alice.post(`/api/clubs/${clubId}/start-voting`);
-    const [x] = await nominations(alice, clubId);
-    for (const u of [alice, bob]) await u.post(`/api/clubs/${clubId}/vote`, { nominationId: x.id });
+  const vote = (user: ReturnType<typeof as>, clubId: number, ...ballot: number[]) =>
+    user.post(`/api/clubs/${clubId}/vote`, { ballot });
 
-    expect((await carol.post(`/api/clubs/${clubId}/close-vote`)).status).toBe(403);
-    expect((await alice.post(`/api/clubs/${clubId}/close-vote`)).status).toBe(200);
-    const club = (await alice.get(`/api/clubs/${clubId}`)).data.club;
-    expect(club.currentPick).toMatchObject({ title: "X", isReading: false });
-    expect(club.stage).toBe("closed");
-
-    await alice.post("/api/me/reading", { book_id: club.currentPick.book_id });
-    expect((await alice.get(`/api/clubs/${clubId}`)).data.club.currentPick.isReading).toBe(true);
-    expect((await bob.get(`/api/clubs/${clubId}`)).data.club.currentPick.isReading).toBe(false);
-  });
-
-  test("a tie needs a runoff, which then resolves", async () => {
+  test("ranked ballots score 3-2-1, hidden until the vote closes", async () => {
     const { alice, bob, carol, clubId, books } = await clubWithMembers();
     for (const id of books) await alice.post(`/api/clubs/${clubId}/nominate`, { book_id: id });
     await alice.post(`/api/clubs/${clubId}/start-voting`);
-    const [x, y] = await nominations(alice, clubId);
-    await alice.post(`/api/clubs/${clubId}/vote`, { nominationId: x.id });
-    await bob.post(`/api/clubs/${clubId}/vote`, { nominationId: y.id });
+    const [x, y, z] = (await nominations(alice, clubId)).map((n) => n.id);
+    // X gets two firsts (6) but Y collects 2 + 2 + 3 = 7.
+    await vote(alice, clubId, z);
+    await vote(alice, clubId, x, y);
+    await vote(bob, clubId, x, y, z);
+    await vote(carol, clubId, y);
+
+    const open = (await bob.get(`/api/clubs/${clubId}`)).data.club;
+    expect(open).toMatchObject({ myBallot: [x, y, z], votedCount: 3 });
+    expect(Object.keys(open.nominations[0])).not.toContain("points");
+
+    expect((await carol.post(`/api/clubs/${clubId}/close-vote`)).status).toBe(403);
+    expect((await alice.post(`/api/clubs/${clubId}/close-vote`)).status).toBe(200);
+    const club = (await bob.get(`/api/clubs/${clubId}`)).data.club;
+    expect(club).toMatchObject({ stage: "closed", nominations: [], currentPick: { title: "Y", mine: null } });
+
+    await bob.post("/api/me/status", { book_id: books[2], status: "wish" });
+    const path = `/api/clubs/${clubId}/results/${club.currentPick.id}`;
+    const { results } = (await bob.get(path)).data;
+    expect(results.voters).toBe(3);
+    expect(results.nominations).toMatchObject([
+      { title: "Y", points: 7, firsts: 1, seconds: 2, thirds: 0, mine: null },
+      { title: "X", points: 6, firsts: 2, mine: null },
+      { title: "Z", points: 1, thirds: 1, mine: "wish" },
+    ]);
+
+    // The next round starts clean, may repeat a book, and leaves the results alone.
+    await alice.post(`/api/clubs/${clubId}/open-nominations`);
+    expect((await alice.post(`/api/clubs/${clubId}/nominate`, { book_id: books[0] })).status).toBe(200);
+    expect(titles(await nominations(alice, clubId))).toEqual(["X"]);
+    expect((await bob.get(path)).data.results.nominations).toHaveLength(3);
+    const dave = await signup("dave");
+    expect((await dave.get(path)).status).toBe(403);
+  });
+
+  test("ballots hold up to three different books", async () => {
+    const { alice, clubId, books } = await clubWithMembers();
+    for (const id of books) await alice.post(`/api/clubs/${clubId}/nominate`, { book_id: id });
+    await alice.post(`/api/clubs/${clubId}/start-voting`);
+    const [x] = await nominations(alice, clubId);
+    expect((await vote(alice, clubId, x.id, x.id)).status).toBe(400);
+    expect((await vote(alice, clubId, 1, 2, 3, 4)).status).toBe(400);
+    expect((await vote(alice, clubId, 999)).status).toBe(404);
+    expect((await vote(alice, clubId)).data.club.myBallot).toEqual([]);
+  });
+
+  test("members nominate up to three and can withdraw only their own", async () => {
+    const { alice, bob, clubId, books } = await clubWithMembers();
+    const extra = (await alice.post("/api/books/manual", manual("W"))).data.book.id;
+    for (const id of books) await bob.post(`/api/clubs/${clubId}/nominate`, { book_id: id });
+    expect((await bob.post(`/api/clubs/${clubId}/nominate`, { book_id: extra })).status).toBe(400);
+    await alice.post(`/api/clubs/${clubId}/nominate`, { book_id: extra });
+
+    const [x, , , w] = await nominations(bob, clubId);
+    expect((await bob.del(`/api/clubs/${clubId}/nominations/${w.id}`)).status).toBe(403);
+    expect((await bob.del(`/api/clubs/${clubId}/nominations/${x.id}`)).status).toBe(200);
+    expect((await bob.post(`/api/clubs/${clubId}/nominate`, { book_id: books[0] })).status).toBe(200);
+    await alice.post(`/api/clubs/${clubId}/start-voting`);
+    const [y] = await nominations(bob, clubId);
+    expect((await bob.del(`/api/clubs/${clubId}/nominations/${y.id}`)).status).toBe(403);
+  });
+
+  test("equal points go to the most first choices", async () => {
+    const { alice, bob, carol, clubId, books } = await clubWithMembers();
+    for (const id of books) await alice.post(`/api/clubs/${clubId}/nominate`, { book_id: id });
+    await alice.post(`/api/clubs/${clubId}/start-voting`);
+    const [x, y, z] = (await nominations(alice, clubId)).map((n) => n.id);
+    // X: 2 + 2 = 4. Z: 3 + 1 = 4, with a first choice. Y: 3.
+    await vote(alice, clubId, z, x);
+    await vote(bob, clubId, y, x, z);
+    expect((await vote(carol, clubId)).status).toBe(200);
+    expect((await alice.post(`/api/clubs/${clubId}/close-vote`)).status).toBe(200);
+    expect((await alice.get(`/api/clubs/${clubId}`)).data.club.currentPick.title).toBe("Z");
+  });
+
+  test("a full tie needs a runoff, which keeps the dropped books in the results", async () => {
+    const { alice, bob, carol, clubId, books } = await clubWithMembers();
+    for (const id of books) await alice.post(`/api/clubs/${clubId}/nominate`, { book_id: id });
+    await alice.post(`/api/clubs/${clubId}/start-voting`);
+    const [x, y, z] = (await nominations(alice, clubId)).map((n) => n.id);
+    await vote(alice, clubId, x, y);
+    await vote(bob, clubId, y, x, z);
 
     const tie = await alice.post(`/api/clubs/${clubId}/close-vote`);
     expect(tie.status).toBe(400);
-    expect(tie.data.runoffNeeded).toBe(true);
+    expect(tie.data).toMatchObject({ runoffNeeded: true, runoffTitles: ["X", "Y"] });
 
-    await alice.post(`/api/clubs/${clubId}/runoff`);
-    expect((await alice.get(`/api/clubs/${clubId}`)).data.club.stage).toBe("runoff");
-    expect(titles(await nominations(alice, clubId))).toEqual(["X", "Y"]);
-    for (const u of [alice, carol]) await u.post(`/api/clubs/${clubId}/vote`, { nominationId: y.id });
-    expect((await alice.post(`/api/clubs/${clubId}/close-vote`)).status).toBe(200);
-    expect((await alice.get(`/api/clubs/${clubId}`)).data.club.currentPick.title).toBe("Y");
+    const runoff = (await alice.post(`/api/clubs/${clubId}/runoff`)).data.club;
+    expect(runoff).toMatchObject({ stage: "runoff", myBallot: [], votedCount: 0 });
+    expect(runoff.nominations.map((n: { eliminated: number }) => n.eliminated)).toEqual([0, 0, 1]);
+    expect((await vote(carol, clubId, z)).status).toBe(404);
+    for (const u of [alice, carol]) await vote(u, clubId, y);
+    const { club } = (await alice.post(`/api/clubs/${clubId}/close-vote`)).data;
+    expect(club.currentPick.title).toBe("Y");
+    const { results } = (await alice.get(`/api/clubs/${clubId}/results/${club.currentPick.id}`)).data;
+    expect(results.nominations).toMatchObject([
+      { title: "Y", points: 6 },
+      { title: "X", points: 0 },
+      { title: "Z", points: 1, eliminated: 1 },
+    ]);
   });
 
   test("stages gate nominating and voting", async () => {
     const { alice, bob, clubId, books } = await clubWithMembers();
     await alice.post(`/api/clubs/${clubId}/nominate`, { book_id: books[0] });
     const [x] = await nominations(alice, clubId);
-    expect((await bob.post(`/api/clubs/${clubId}/vote`, { nominationId: x.id })).status).toBe(400);
+    expect((await vote(bob, clubId, x.id)).status).toBe(400);
     expect((await bob.post(`/api/clubs/${clubId}/start-voting`)).status).toBe(403);
     await alice.post(`/api/clubs/${clubId}/start-voting`);
     expect((await bob.post(`/api/clubs/${clubId}/nominate`, { book_id: books[1] })).status).toBe(400);
@@ -434,11 +543,18 @@ describe("clubs", () => {
     for (const id of books.slice(0, 2)) await alice.post(`/api/clubs/${clubId}/nominate`, { book_id: id });
     await alice.post(`/api/clubs/${clubId}/start-voting`);
     const [x, y] = await nominations(alice, clubId);
-    await alice.post(`/api/clubs/${clubId}/vote`, { nominationId: x.id });
+    await vote(alice, clubId, x.id, y.id);
     expect((await bob.post(`/api/clubs/${clubId}/veto`, { nominationId: x.id })).status).toBe(200);
     expect((await bob.post(`/api/clubs/${clubId}/veto`, { nominationId: y.id })).status).toBe(400);
-    const club = (await alice.get(`/api/clubs/${clubId}`)).data.club;
-    expect(club.myVote).toBeNull();
+    expect((await alice.get(`/api/clubs/${clubId}`)).data.club.myBallot).toEqual([y.id]);
+
+    // Y moved up to first choice.
+    const { club } = (await alice.post(`/api/clubs/${clubId}/close-vote`)).data;
+    const { results } = (await alice.get(`/api/clubs/${clubId}/results/${club.currentPick.id}`)).data;
+    expect(results.nominations).toMatchObject([
+      { title: "Y", points: 3 },
+      { title: "X", vetoedBy: "bob" },
+    ]);
   });
 
   test("non-members can't see a club; a missing club is 404", async () => {
