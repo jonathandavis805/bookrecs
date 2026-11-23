@@ -29,3 +29,18 @@ test("0011 maps the old club flags onto a single stage", () => {
   expect(columns).not.toContain("voting_open");
   expect(columns).not.toContain("runoff");
 });
+
+test("0016_shared_categories keeps existing category assignments", () => {
+  const sqlite = new Database(":memory:");
+  sqlite.run("PRAGMA foreign_keys = ON");
+  migrate(sqlite, undefined, "0016_shared_categories.sql");
+  sqlite.run("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'a', 'a@test.dev', 'x')");
+  sqlite.run("INSERT INTO books (id, ol_key, title) VALUES (7, 'k', 'Dune')");
+  sqlite.run("INSERT INTO reads (user_id, book_id, rank) VALUES (1, 7, 1)");
+  sqlite.run("INSERT INTO categories (id, user_id, name) VALUES (3, 1, 'Sci-fi')");
+  sqlite.run("INSERT INTO category_books (category_id, user_id, book_id) VALUES (3, 1, 7)");
+
+  migrate(sqlite, "0016_shared_categories.sql");
+
+  expect(sqlite.query("SELECT * FROM category_books").all()).toEqual([{ category_id: 3, user_id: 1, book_id: 7 }]);
+});

@@ -9,11 +9,15 @@ export interface Category {
 
 const MAX_NAME = 50;
 
-// With publicOnly, only categories holding at least one public book (what a friend sees).
+// With publicOnly, only categories holding at least one book a friend can see.
 export async function listCategories(db: D1Database, userId: number, publicOnly = false): Promise<Category[]> {
   const visible = publicOnly
-    ? `AND EXISTS (SELECT 1 FROM category_books cb JOIN reads r ON r.user_id = cb.user_id AND r.book_id = cb.book_id
-                   WHERE cb.category_id = c.id AND r.public = 1)`
+    ? `AND EXISTS (SELECT 1 FROM category_books cb JOIN (
+                     SELECT user_id, book_id FROM reads WHERE public = 1
+                     UNION ALL SELECT user_id, book_id FROM wishlist WHERE public = 1
+                     UNION ALL SELECT user_id, book_id FROM reading
+                   ) v ON v.user_id = cb.user_id AND v.book_id = cb.book_id
+                   WHERE cb.category_id = c.id)`
     : "";
   return await queryAll<Category>(
     db,
@@ -71,9 +75,15 @@ export async function setBookCategories(
   bookId: number,
   categoryIds: number[],
 ): Promise<Result> {
-  if (!(await queryOne(db, "SELECT 1 FROM reads WHERE user_id = ? AND book_id = ?", userId, bookId))) {
-    return notFound("Book not on your list");
-  }
+  const onAny = await queryOne(
+    db,
+    `SELECT 1 FROM reads WHERE user_id = ?1 AND book_id = ?2
+     UNION ALL SELECT 1 FROM wishlist WHERE user_id = ?1 AND book_id = ?2
+     UNION ALL SELECT 1 FROM reading WHERE user_id = ?1 AND book_id = ?2`,
+    userId,
+    bookId,
+  );
+  if (!onAny) return notFound("Book not on your lists");
   const own = new Set((await listCategories(db, userId)).map((c) => c.id));
   const ids = [...new Set(categoryIds)].filter((id) => own.has(id));
   await db.batch([

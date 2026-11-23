@@ -10,7 +10,7 @@ import {
   type User,
 } from "../api";
 import { Byline, Cover } from "./ui/Book";
-import { IconChevronLeft, IconClock, IconThumbsUp, IconX } from "./ui/icons";
+import { IconCheck, IconChevronLeft, IconClock, IconThumbsDown, IconThumbsUp, IconX } from "./ui/icons";
 import { ConfirmDialog, Modal } from "./ui/Modal";
 
 function goBackToClubs() {
@@ -353,7 +353,7 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
       {error && <div className="error">{error}</div>}
       {info && <div className="success">{info}</div>}
 
-      {data.currentPick && <CurrentPick pick={data.currentPick} />}
+      {data.currentPick && <CurrentPick pick={data.currentPick} onStarted={load} />}
 
       <section className="club-section">
         <h3 className="section-title">
@@ -824,16 +824,26 @@ function NominationRow({
       <div className="actions">
         {!vetoed && voting && (
           <>
-            <span className="club-vote-count" title={`${n.votes} vote${n.votes === 1 ? "" : "s"}`}>
+            <button
+              type="button"
+              className={`btn-secondary vote-btn${myVote ? " on" : ""}`}
+              onClick={myVote ? onUnvote : onVote}
+              title={myVote ? "Remove your vote" : "Vote for this book"}
+              aria-label={`Vote for ${n.title}, ${n.votes} vote${n.votes === 1 ? "" : "s"}`}
+              aria-pressed={myVote}
+            >
               <IconThumbsUp />
               {n.votes}
-            </span>
-            <button type="button" onClick={myVote ? onUnvote : onVote}>
-              {myVote ? "Unvote" : "Vote"}
             </button>
             {canVeto && (
-              <button type="button" className="danger" onClick={onVeto} title="Strike this book (one veto per vote)">
-                Veto
+              <button
+                type="button"
+                className="danger"
+                onClick={onVeto}
+                title="Veto: strike this book (one veto per vote)"
+                aria-label={`Veto ${n.title}`}
+              >
+                <IconThumbsDown />
               </button>
             )}
           </>
@@ -854,8 +864,13 @@ function NominationRow({
   );
 }
 
-function CurrentPick({ pick }: { pick: NonNullable<ClubDetailData["currentPick"]> }) {
-  const [started, setStarted] = useState(false);
+function CurrentPick({
+  pick,
+  onStarted,
+}: {
+  pick: NonNullable<ClubDetailData["currentPick"]>;
+  onStarted: () => Promise<void>;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -867,7 +882,7 @@ function CurrentPick({ pick }: { pick: NonNullable<ClubDetailData["currentPick"]
         method: "POST",
         body: JSON.stringify({ book_id: pick.book_id }),
       });
-      setStarted(true);
+      await onStarted();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -888,8 +903,10 @@ function CurrentPick({ pick }: { pick: NonNullable<ClubDetailData["currentPick"]
           </div>
           <Byline author={pick.author} year={pick.first_publish_year} />
           <div className="actions">
-            {started ? (
-              <span className="success-text">On your reading list</span>
+            {pick.isReading ? (
+              <button type="button" disabled>
+                <IconCheck /> Reading
+              </button>
             ) : (
               <button type="button" onClick={startReading} disabled={busy}>
                 {busy ? "Adding…" : "Start reading"}

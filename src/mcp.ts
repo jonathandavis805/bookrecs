@@ -104,12 +104,12 @@ const tools: Tool[] = [
   },
   {
     name: "my_categories",
-    description: "The user's categories for books read.",
+    description: "The user's categories, shared by books read, wishlist and currently reading.",
     request: () => ["GET", "/api/me/categories"],
   },
   {
     name: "create_category",
-    description: "Create a category for books read.",
+    description: "Create a category for books on any of the user's lists.",
     properties: { name: str() },
     required: ["name"],
     request: (a) => ["POST", "/api/me/categories", { name: a.name }],
@@ -123,14 +123,14 @@ const tools: Tool[] = [
   },
   {
     name: "delete_category",
-    description: "Delete a category. Its books stay on the read list.",
+    description: "Delete a category. Its books stay on their lists.",
     properties: { category_id: num() },
     required: ["category_id"],
     request: (a) => ["DELETE", `/api/me/categories/${seg(a.category_id)}`],
   },
   {
     name: "set_book_categories",
-    description: "Replace the categories of a book on the read list (empty list removes it from all).",
+    description: "Replace the categories of a book on any of the user's lists (empty list removes it from all).",
     properties: { book_id: bookId, category_ids: categoryIds },
     required: ["book_id", "category_ids"],
     request: (a) => ["POST", `/api/me/books/${seg(a.book_id)}/categories`, { category_ids: a.category_ids }],
@@ -138,7 +138,7 @@ const tools: Tool[] = [
   {
     name: "reorder_category",
     description:
-      "Reorder the books in a category. They swap among the overall positions they already hold, so books outside the category keep their rank. Books left out keep their order after the given ones.",
+      "Reorder the read books in a category. They swap among the overall positions they already hold, so books outside the category keep their rank. Books left out keep their order after the given ones.",
     properties: { category_id: num(), book_ids: ids("Book ids in the category, top first") },
     required: ["category_id", "book_ids"],
     request: (a) => ["POST", `/api/me/categories/${seg(a.category_id)}/reorder`, { ordered: a.book_ids }],
@@ -222,7 +222,7 @@ const tools: Tool[] = [
   },
   {
     name: "add_to_reading",
-    description: "Start reading a book, by Open Library key or existing book id.",
+    description: "Start reading a book, by Open Library key or existing book id. Takes it off the wishlist.",
     properties: { ol_key: str(), book_id: bookId },
     request: (a) => ["POST", "/api/me/reading", a],
   },

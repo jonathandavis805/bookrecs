@@ -30,17 +30,19 @@ export async function listFriends(db: D1Database, userId: number): Promise<{ use
   );
 }
 
+type FriendReadingRow = Omit<ReadingRow, "category_ids">;
+
 export interface FriendWithReading {
   user_id: number;
   username: string;
-  reading: ReadingRow[];
+  reading: FriendReadingRow[];
 }
 
 // Each friend with their two most recent currently-reading books.
 export async function listFriendsWithReading(db: D1Database, userId: number): Promise<FriendWithReading[]> {
   const friends = await listFriends(db, userId);
   if (friends.length === 0) return [];
-  const rows = await queryAll<ReadingRow & { user_id: number }>(
+  const rows = await queryAll<FriendReadingRow & { user_id: number }>(
     db,
     `SELECT * FROM (
        SELECT r.user_id, r.book_id, r.listening, r.created_at, ${BOOK_COLUMNS},
@@ -50,7 +52,7 @@ export async function listFriendsWithReading(db: D1Database, userId: number): Pr
      ) WHERE rn <= 2 ORDER BY user_id, rn`,
     userId,
   );
-  const byUser = new Map<number, ReadingRow[]>();
+  const byUser = new Map<number, FriendReadingRow[]>();
   for (const { user_id, ...book } of rows) byUser.set(user_id, [...(byUser.get(user_id) ?? []), book]);
   return friends.map((f) => ({ ...f, reading: byUser.get(f.user_id) ?? [] }));
 }

@@ -212,6 +212,62 @@ describe("categories", () => {
     expect((await bob.post(`/api/me/books/${ids.Dune}/categories`, { category_ids: [] })).status).toBe(404);
   });
 
+  test("categories follow a book from wishlist to reading and back, and go once it is on no list", async () => {
+    const { alice, ids, scifi } = await shelf();
+    const id = ids.Dune;
+    await alice.post("/api/me/reading", { book_id: id });
+    await alice.del(`/api/me/books/${id}`);
+    await alice.del(`/api/me/reading/${id}`);
+    await alice.post("/api/me/wishlist", { book_id: id });
+    const on = async (list: string) => (await alice.get(`/api/me/${list}`)).data.books[0]?.category_ids;
+    expect(await on("wishlist")).toEqual([]);
+
+    await alice.post(`/api/me/books/${id}/categories`, { category_ids: [scifi] });
+    expect(await on("wishlist")).toEqual([scifi]);
+    await alice.post("/api/me/reading/from-wishlist", { book_id: id });
+    expect(await on("reading")).toEqual([scifi]);
+    await alice.post(`/api/me/reading/${id}/back-to-wishlist`);
+    expect(await on("wishlist")).toEqual([scifi]);
+    await alice.post("/api/me/reading/from-wishlist", { book_id: id });
+    await alice.del(`/api/me/reading/${id}`);
+    expect(await on("wishlist")).toEqual([scifi]);
+    await alice.post("/api/me/reading/from-wishlist", { book_id: id });
+    await alice.post(`/api/me/reading/${id}/finish`);
+    const { books } = (await alice.get("/api/me/books")).data;
+    expect(books.find((b: { book_id: number }) => b.book_id === id).category_ids).toEqual([scifi]);
+  });
+
+  test("starting a wishlist book takes it off the wishlist, keeping its categories and place", async () => {
+    const { alice, ids, scifi } = await shelf();
+    for (const t of ["Dune", "Emma"]) {
+      await alice.del(`/api/me/books/${ids[t]}`);
+      await alice.post("/api/me/wishlist", { book_id: ids[t] });
+    }
+    await alice.post(`/api/me/books/${ids.Dune}/categories`, { category_ids: [scifi] });
+
+    const { data } = await alice.post("/api/me/reading", { book_id: ids.Dune });
+    expect(data.books[0].category_ids).toEqual([scifi]);
+    expect(titles((await alice.get("/api/me/wishlist")).data.books)).toEqual(["Emma"]);
+    await alice.post(`/api/me/reading/${ids.Dune}/back-to-wishlist`);
+    expect(titles((await alice.get("/api/me/wishlist")).data.books)).toEqual(["Dune", "Emma"]);
+  });
+
+  test("friends see categories used only on a public wishlist item", async () => {
+    const { alice, ids } = await shelf();
+    const later = (await alice.post("/api/me/categories", { name: "Later" })).data.category.id;
+    await alice.del(`/api/me/books/${ids.Emma}`);
+    await alice.post("/api/me/wishlist", { book_id: ids.Emma, public: false });
+    await alice.post(`/api/me/books/${ids.Emma}/categories`, { category_ids: [later] });
+
+    const bob = await signup("bob");
+    await befriend(alice, bob, "bob");
+    const names = async () =>
+      (await bob.get("/api/friends/alice/books")).data.categories.map((c: { name: string }) => c.name);
+    expect(await names()).toEqual(["Sci-fi"]);
+    await alice.post(`/api/me/wishlist/${ids.Emma}/public`, { public: true });
+    expect(await names()).toEqual(["Later", "Sci-fi"]);
+  });
+
   test("friends see categories with public books, holding only public books", async () => {
     const { alice, ids, scifi } = await shelf();
     const hidden = (await alice.post("/api/me/categories", { name: "Hidden" })).data.category.id;
@@ -335,8 +391,12 @@ describe("clubs", () => {
     expect((await carol.post(`/api/clubs/${clubId}/close-vote`)).status).toBe(403);
     expect((await alice.post(`/api/clubs/${clubId}/close-vote`)).status).toBe(200);
     const club = (await alice.get(`/api/clubs/${clubId}`)).data.club;
-    expect(club.currentPick.title).toBe("X");
+    expect(club.currentPick).toMatchObject({ title: "X", isReading: false });
     expect(club.stage).toBe("closed");
+
+    await alice.post("/api/me/reading", { book_id: club.currentPick.book_id });
+    expect((await alice.get(`/api/clubs/${clubId}`)).data.club.currentPick.isReading).toBe(true);
+    expect((await bob.get(`/api/clubs/${clubId}`)).data.club.currentPick.isReading).toBe(false);
   });
 
   test("a tie needs a runoff, which then resolves", async () => {

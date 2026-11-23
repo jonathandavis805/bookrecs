@@ -91,7 +91,8 @@ export interface ClubDetail {
   nominations: ClubNominationRow[];
   myVote: number | null;
   myVetoUsed: boolean;
-  currentPick: ClubPickRow | null;
+  // isReading: the viewer has it in currently reading.
+  currentPick: (ClubPickRow & { isReading: boolean }) | null;
   pastPicks: ClubPickRow[];
 }
 
@@ -356,6 +357,10 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
      WHERE p.club_id = ? ORDER BY p.picked_at DESC, p.id DESC`,
     clubId,
   );
+  const [pick, ...pastPicks] = picks;
+  const reading = pick
+    ? await queryOne(db, "SELECT 1 FROM reading WHERE user_id = ? AND book_id = ?", userId, pick.book_id)
+    : null;
 
   return {
     ok: true,
@@ -367,8 +372,8 @@ export async function getClub(db: D1Database, userId: number, clubId: number): P
       nominations,
       myVote: myVote?.nomination_id ?? null,
       myVetoUsed: nominations.some((n) => n.vetoed_by === userId),
-      currentPick: picks[0] ?? null,
-      pastPicks: picks.slice(1),
+      currentPick: pick ? { ...pick, isReading: !!reading } : null,
+      pastPicks,
     },
   };
 }
