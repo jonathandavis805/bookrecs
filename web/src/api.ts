@@ -9,7 +9,7 @@ export interface User {
 }
 
 // Mirrors MineStatus in src/core/lists.ts.
-export type MineStatus = "read" | "wish" | "reading" | "rereading" | null;
+export type MineStatus = "read" | "listened" | "wish" | "reading" | "listening" | "rereading" | "relistening" | null;
 
 export interface ListItem {
   id: number;
@@ -31,7 +31,6 @@ export interface Book extends ListItem {
   public: number;
   listened: number;
   updated_at: number;
-  isReading?: boolean;
   synopsis?: string | null;
 }
 

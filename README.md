@@ -166,68 +166,68 @@ Bearer <token>` where the token is minted via `POST /api/token`). Errors are
 `{error}` with 400 (invalid), 403 (not allowed) or 404 (not found). Club changes
 answer with the updated club detail (`{club}`).
 
-| Method | Path                                       | Description                                                                                       |
-| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| POST   | `/api/signup`                              | `{username, email, password}` → starts a session                                                  |
-| POST   | `/api/login`                               | `{usernameOrEmail, password}` → starts a session                                                  |
-| POST   | `/api/logout`                              | ends the session                                                                                  |
-| GET    | `/api/me`                                  | current user (or `{user: null}`)                                                                  |
-| POST   | `/api/token`                               | mint a bearer token for scripting                                                                 |
-| GET    | `/api/books/search?q=`                     | search Open Library                                                                               |
-| POST   | `/api/books`                               | add `{ol_key, review?, rank?, year?, public?}` to your list                                       |
-| POST   | `/api/books/manual`                        | add by hand `{title, author?, year?, coverUrl?, review?, rank?, public?}`                         |
-| GET    | `/api/me/books`                            | your ranked list (each with `public`)                                                             |
-| POST   | `/api/me/books/reorder`                    | `{ordered: [bookIds]}` full order                                                                 |
-| PATCH  | `/api/me/books/:id`                        | update `{review?}`, `{rank?}`                                                                     |
-| POST   | `/api/me/books/:id/public`                 | `{public}` set a book public/private                                                              |
-| DELETE | `/api/me/books/:id`                        | remove                                                                                            |
-| POST   | `/api/me/status`                           | `{status: reading/wish/read, book_id?, ol_key?, year?}` put a book on a list, moving it if needed |
-| GET    | `/api/me/wishlist`                         | your wishlist (each item: `owned`, `public`)                                                      |
-| POST   | `/api/me/wishlist`                         | add `{ol_key?, book_id?, owned?, public?, rank?}` (book_id = someone else's book)                 |
-| POST   | `/api/me/wishlist/manual`                  | add by hand `{title, author?, year?, coverUrl?, owned?, public?, rank?}`                          |
-| POST   | `/api/me/wishlist/reorder`                 | `{ordered: [bookIds]}` reorder wishlist                                                           |
-| POST   | `/api/me/wishlist/:id/owned`               | `{owned}` mark owned / not                                                                        |
-| POST   | `/api/me/wishlist/:id/public`              | `{public}` set a wishlist item public/private                                                     |
-| POST   | `/api/me/wishlist/:id/move-to-read`        | `{review?, rank?}` move wishlist → read list                                                      |
-| DELETE | `/api/me/wishlist/:id`                     | remove wishlist item                                                                              |
-| GET    | `/api/friends/:username/wishlist`          | a friend's public wishlist                                                                        |
-| GET    | `/api/me/reading`                          | your currently-reading books                                                                      |
-| POST   | `/api/me/reading`                          | add `{ol_key?, book_id?, year?}` (currently reading)                                              |
-| POST   | `/api/me/reading/manual`                   | add by hand `{title, author?, year?, coverUrl?}`                                                  |
-| POST   | `/api/me/reading/:id/finish`               | `{review?, rank?}` move reading → read list                                                       |
-| POST   | `/api/me/reading/:id/back-to-wishlist`     | move reading → wishlist                                                                           |
-| DELETE | `/api/me/reading/:id`                      | remove                                                                                            |
-| GET    | `/api/friends/:username/reading`           | a friend's currently-reading (always visible)                                                     |
-| GET    | `/api/users/discover?q=`                   | discoverable users, filtered by username/email when `q` is given                                  |
-| GET    | `/api/friends`                             | accepted friends                                                                                  |
-| POST   | `/api/friends/requests`                    | `{usernameOrEmail}` send request                                                                  |
-| GET    | `/api/friends/requests`                    | pending requests (in/out)                                                                         |
-| POST   | `/api/friends/requests/:id/accept`         | accept                                                                                            |
-| POST   | `/api/friends/requests/:id/decline`        | decline                                                                                           |
-| GET    | `/api/friends/:username/books`             | a friend's public books (each flagged `mine`)                                                     |
-| DELETE | `/api/friends/:id`                         | unfriend                                                                                          |
-| POST   | `/api/clubs`                               | create `{name, description?, usernames?[]}` (invitees must be friends)                            |
-| GET    | `/api/clubs`                               | your clubs + pending invites                                                                      |
-| GET    | `/api/clubs/:id`                           | club detail: members, nominations, your ballot, how many voted, current + past picks              |
-| GET    | `/api/clubs/:id/events`                    | live club detail over Server-Sent Events (single `data:` per change; `gone` event on access loss) |
-| POST   | `/api/clubs/:id/invite`                    | `{username}` invite a friend (members only)                                                       |
-| POST   | `/api/clubs/:id/respond`                   | `{accept}` accept/decline your invite                                                             |
-| POST   | `/api/clubs/:id/nominate`                  | `{ol_key?, book_id?, year?}` nominate a book (nomination stage only, three each)                  |
-| POST   | `/api/clubs/:id/vote`                      | `{ballot: [nominationIds]}` replace your ballot, first choice first, up to three                  |
-| POST   | `/api/clubs/:id/veto`                      | `{nominationId}` strike a nomination (one veto per member per vote)                               |
-| DELETE | `/api/clubs/:id/nominations/:nominationId` | owner: remove a nomination; members: withdraw their own while nominating                          |
-| GET    | `/api/clubs/:id/results/:pickId`           | a closed round: every nomination with points, places and your list status (`mine`)                |
-| POST   | `/api/clubs/:id/open-nominations`          | owner: start a new cycle in the nomination stage                                                  |
-| POST   | `/api/clubs/:id/start-voting`              | owner: lock nominations and open the vote                                                         |
-| POST   | `/api/clubs/:id/back-to-nominations`       | owner: clear all votes and return to the nomination stage                                         |
-| POST   | `/api/clubs/:id/close-vote`                | owner: most points wins (a full tie answers with `runoffTitles`)                                  |
-| POST   | `/api/clubs/:id/runoff`                    | owner: revote among the tied books                                                                |
-| DELETE | `/api/clubs/:id/members/:userId`           | owner: remove a member / cancel invite                                                            |
-| POST   | `/api/clubs/:id/leave`                     | member: leave the club                                                                            |
-| POST   | `/api/clubs/:id/transfer`                  | owner: `{userId}` transfer ownership to a member and leave                                        |
-| DELETE | `/api/clubs/:id`                           | owner: delete the club                                                                            |
-| GET    | `/api/notifications`                       | grouped notifications and the unread count                                                        |
-| POST   | `/api/notifications/seen`                  | mark everything that doesn't need a response as read                                              |
+| Method | Path                                       | Description                                                                                                          |
+| ------ | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/signup`                              | `{username, email, password}` → starts a session                                                                     |
+| POST   | `/api/login`                               | `{usernameOrEmail, password}` → starts a session                                                                     |
+| POST   | `/api/logout`                              | ends the session                                                                                                     |
+| GET    | `/api/me`                                  | current user (or `{user: null}`)                                                                                     |
+| POST   | `/api/token`                               | mint a bearer token for scripting                                                                                    |
+| GET    | `/api/books/search?q=`                     | search Open Library                                                                                                  |
+| POST   | `/api/books`                               | add `{ol_key, review?, rank?, year?, public?}` to your list                                                          |
+| POST   | `/api/books/manual`                        | add by hand `{title, author?, year?, coverUrl?, review?, rank?, public?}`                                            |
+| GET    | `/api/me/books`                            | your ranked list (each with `public`)                                                                                |
+| POST   | `/api/me/books/reorder`                    | `{ordered: [bookIds]}` full order                                                                                    |
+| PATCH  | `/api/me/books/:id`                        | update `{review?}`, `{rank?}`                                                                                        |
+| POST   | `/api/me/books/:id/public`                 | `{public}` set a book public/private                                                                                 |
+| DELETE | `/api/me/books/:id`                        | remove                                                                                                               |
+| POST   | `/api/me/status`                           | `{status: reading/listening/wish/read/listened, book_id?, ol_key?, year?}` put a book on a list, moving it if needed |
+| GET    | `/api/me/wishlist`                         | your wishlist (each item: `owned`, `public`)                                                                         |
+| POST   | `/api/me/wishlist`                         | add `{ol_key?, book_id?, owned?, public?, rank?}` (book_id = someone else's book)                                    |
+| POST   | `/api/me/wishlist/manual`                  | add by hand `{title, author?, year?, coverUrl?, owned?, public?, rank?}`                                             |
+| POST   | `/api/me/wishlist/reorder`                 | `{ordered: [bookIds]}` reorder wishlist                                                                              |
+| POST   | `/api/me/wishlist/:id/owned`               | `{owned}` mark owned / not                                                                                           |
+| POST   | `/api/me/wishlist/:id/public`              | `{public}` set a wishlist item public/private                                                                        |
+| POST   | `/api/me/wishlist/:id/move-to-read`        | `{review?, rank?}` move wishlist → read list                                                                         |
+| DELETE | `/api/me/wishlist/:id`                     | remove wishlist item                                                                                                 |
+| GET    | `/api/friends/:username/wishlist`          | a friend's public wishlist                                                                                           |
+| GET    | `/api/me/reading`                          | your currently-reading books                                                                                         |
+| POST   | `/api/me/reading`                          | add `{ol_key?, book_id?, year?}` (currently reading)                                                                 |
+| POST   | `/api/me/reading/manual`                   | add by hand `{title, author?, year?, coverUrl?}`                                                                     |
+| POST   | `/api/me/reading/:id/finish`               | `{review?, rank?}` move reading → read list                                                                          |
+| POST   | `/api/me/reading/:id/back-to-wishlist`     | move reading → wishlist                                                                                              |
+| DELETE | `/api/me/reading/:id`                      | remove                                                                                                               |
+| GET    | `/api/friends/:username/reading`           | a friend's currently-reading (always visible)                                                                        |
+| GET    | `/api/users/discover?q=`                   | discoverable users, filtered by username/email when `q` is given                                                     |
+| GET    | `/api/friends`                             | accepted friends                                                                                                     |
+| POST   | `/api/friends/requests`                    | `{usernameOrEmail}` send request                                                                                     |
+| GET    | `/api/friends/requests`                    | pending requests (in/out)                                                                                            |
+| POST   | `/api/friends/requests/:id/accept`         | accept                                                                                                               |
+| POST   | `/api/friends/requests/:id/decline`        | decline                                                                                                              |
+| GET    | `/api/friends/:username/books`             | a friend's public books (each flagged `mine`)                                                                        |
+| DELETE | `/api/friends/:id`                         | unfriend                                                                                                             |
+| POST   | `/api/clubs`                               | create `{name, description?, usernames?[]}` (invitees must be friends)                                               |
+| GET    | `/api/clubs`                               | your clubs + pending invites                                                                                         |
+| GET    | `/api/clubs/:id`                           | club detail: members, nominations, your ballot, how many voted, current + past picks                                 |
+| GET    | `/api/clubs/:id/events`                    | live club detail over Server-Sent Events (single `data:` per change; `gone` event on access loss)                    |
+| POST   | `/api/clubs/:id/invite`                    | `{username}` invite a friend (members only)                                                                          |
+| POST   | `/api/clubs/:id/respond`                   | `{accept}` accept/decline your invite                                                                                |
+| POST   | `/api/clubs/:id/nominate`                  | `{ol_key?, book_id?, year?}` nominate a book (nomination stage only, three each)                                     |
+| POST   | `/api/clubs/:id/vote`                      | `{ballot: [nominationIds]}` replace your ballot, first choice first, up to three                                     |
+| POST   | `/api/clubs/:id/veto`                      | `{nominationId}` strike a nomination (one veto per member per vote)                                                  |
+| DELETE | `/api/clubs/:id/nominations/:nominationId` | owner: remove a nomination; members: withdraw their own while nominating                                             |
+| GET    | `/api/clubs/:id/results/:pickId`           | a closed round: every nomination with points, places and your list status (`mine`)                                   |
+| POST   | `/api/clubs/:id/open-nominations`          | owner: start a new cycle in the nomination stage                                                                     |
+| POST   | `/api/clubs/:id/start-voting`              | owner: lock nominations and open the vote                                                                            |
+| POST   | `/api/clubs/:id/back-to-nominations`       | owner: clear all votes and return to the nomination stage                                                            |
+| POST   | `/api/clubs/:id/close-vote`                | owner: most points wins (a full tie answers with `runoffTitles`)                                                     |
+| POST   | `/api/clubs/:id/runoff`                    | owner: revote among the tied books                                                                                   |
+| DELETE | `/api/clubs/:id/members/:userId`           | owner: remove a member / cancel invite                                                                               |
+| POST   | `/api/clubs/:id/leave`                     | member: leave the club                                                                                               |
+| POST   | `/api/clubs/:id/transfer`                  | owner: `{userId}` transfer ownership to a member and leave                                                           |
+| DELETE | `/api/clubs/:id`                           | owner: delete the club                                                                                               |
+| GET    | `/api/notifications`                       | grouped notifications and the unread count                                                                           |
+| POST   | `/api/notifications/seen`                  | mark everything that doesn't need a response as read                                                                 |
 
 ## Notes
 
@@ -268,5 +268,6 @@ answer with the updated club detail (`{club}`).
   who want out must transfer ownership to a member or delete the club.
 - A status picker (Reading, Wishlist, Read) shows which of your lists a book is on
   and moves it: on your own lists, friends' books, book pages, search results and club
-  results. A book you've read can also be read again, which lights up both.
+  results. A book you've read can also be read again, which lights up both. Pressing
+  the lit Reading or Read switches it to Listening or Listened, and back.
 - Database migrations are in `migrations/`, applied with `wrangler d1 migrations apply`: `bun run migrate:local` for local dev, and `bun run migrate:remote` (run by CI on deploy) for production.

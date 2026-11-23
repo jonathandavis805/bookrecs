@@ -16,7 +16,7 @@ import { ClubResults } from "./ClubResults";
 import { Byline, Cover } from "./ui/Book";
 import { IconChevronLeft, IconClock, IconThumbsDown, IconThumbsUp, IconX } from "./ui/icons";
 import { ConfirmDialog, Modal } from "./ui/Modal";
-import { StatusPicker } from "./ui/StatusPicker";
+import { StatusPicker, statusLabel } from "./ui/StatusPicker";
 
 function goBackToClubs() {
   // Arrived from inside the app (the clubs list)? Go back so the browser
@@ -738,15 +738,7 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
                 <div className="info">
                   <div className="title">
                     {h.title}
-                    {h.mine && (
-                      <span className="badge">
-                        {h.mine === "reading" || h.mine === "rereading"
-                          ? "Reading"
-                          : h.mine === "wish"
-                            ? "Wishlist"
-                            : "Read"}
-                      </span>
-                    )}
+                    {h.mine && <span className="badge">{statusLabel(h.mine)}</span>}
                   </div>
                   <Byline author={h.author} year={h.year} />
                 </div>

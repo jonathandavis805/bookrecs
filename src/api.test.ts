@@ -185,6 +185,20 @@ describe("status", () => {
     expect((await set("read")).data.mine).toBe("read");
     expect(await lists()).toEqual(["read"]);
     expect((await set("owned")).status).toBe(400);
+
+    expect((await set("listened")).data.mine).toBe("listened");
+    expect((await set("listening")).data.mine).toBe("relistening");
+    expect((await set("reading")).data.mine).toBe("rereading");
+    expect((await set("read")).data.mine).toBe("listened");
+    expect((await set("read")).data.mine).toBe("read");
+  });
+
+  test("a book finished while listening is marked listened", async () => {
+    const alice = await signup("alice");
+    const book_id = (await alice.post("/api/me/reading/manual", manual("Dune"))).data.book.id;
+    const set = (status: string) => alice.post("/api/me/status", { book_id, status });
+    expect((await set("listening")).data.mine).toBe("listening");
+    expect((await set("read")).data.mine).toBe("listened");
   });
 
   test("the book limit applies to books marked read", async () => {

@@ -16,7 +16,7 @@ import { CategoryAdder, CategoryBar, CategoryTags } from "./Categories";
 import { Byline, Cover } from "./ui/Book";
 import { IconBook, IconChevronDown } from "./ui/icons";
 import { RemoveButton, SortableRow } from "./ui/SortableRow";
-import { StatusPicker } from "./ui/StatusPicker";
+import { readingStatus, readStatus, StatusPicker } from "./ui/StatusPicker";
 import { Switch } from "./ui/Switch";
 
 interface Props {
@@ -324,21 +324,11 @@ export default function Profile({ username, me }: Props) {
                     badge={!isSelf && b.listening ? <span className="badge">Listening</span> : null}
                     categories={categories}
                     onSetCategories={isSelf ? (ids) => setBookCategories(b.book_id, ids) : undefined}
-                  >
-                    {isSelf && (
-                      <div className="toggle-row">
-                        <FormatPicker
-                          listened={!!b.listening}
-                          labels={["Reading", "Listening"]}
-                          onChange={(next) => setFlag("reading", setReading, b.book_id, "listening", next)}
-                        />
-                      </div>
-                    )}
-                  </BookSummary>
+                  />
                   {isSelf ? (
                     <div className="actions">
                       <StatusPicker
-                        status={books?.some((r) => r.book_id === b.book_id) ? "rereading" : "reading"}
+                        status={readingStatus(b.listening, !!books?.some((r) => r.book_id === b.book_id))}
                         book={{ book_id: b.book_id }}
                         onChange={refreshMine}
                       />
@@ -427,7 +417,7 @@ export default function Profile({ username, me }: Props) {
                   }}
                   onSaveReview={() => saveReview(b.book_id)}
                   onTogglePublic={(next) => setFlag("books", setBooks, b.book_id, "public", next)}
-                  onSetListened={(next) => setFlag("books", setBooks, b.book_id, "listened", next)}
+                  reading={reading?.find((r) => r.book_id === b.book_id)}
                   onMoved={refreshMine}
                   onRemove={() => remove("books", b.book_id)}
                 />
@@ -505,32 +495,6 @@ export default function Profile({ username, me }: Props) {
   );
 }
 
-function FormatPicker({
-  listened,
-  labels,
-  onChange,
-}: {
-  listened: boolean;
-  labels: [read: string, listened: string];
-  onChange: (listened: boolean) => void;
-}) {
-  return (
-    <div className="segmented compact">
-      {[false, true].map((value) => (
-        <button
-          key={String(value)}
-          type="button"
-          className={listened === value ? "active" : ""}
-          aria-pressed={listened === value}
-          onClick={() => onChange(value)}
-        >
-          {labels[value ? 1 : 0]}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function BookSummary({
   book,
   badge,
@@ -578,7 +542,7 @@ function ReadItem({
   reviewOnChange,
   onSaveReview,
   onTogglePublic,
-  onSetListened,
+  reading,
   onMoved,
   onRemove,
 }: {
@@ -593,7 +557,7 @@ function ReadItem({
   reviewOnChange: (v: string) => void;
   onSaveReview: () => void;
   onTogglePublic: (next: boolean) => void;
-  onSetListened: (next: boolean) => void;
+  reading?: ReadingItem;
   onMoved: () => void;
   onRemove: () => void;
 }) {
@@ -601,7 +565,13 @@ function ReadItem({
 
   return (
     <SortableRow item={book} rank={rank} className="read-row">
-      <BookSummary book={book} overall={overall} categories={categories} onSetCategories={onSetCategories}>
+      <BookSummary
+        book={book}
+        badge={reading && book.listened ? <span className="badge">Listened</span> : null}
+        overall={overall}
+        categories={categories}
+        onSetCategories={onSetCategories}
+      >
         <div className="review-row">
           <button
             type="button"
@@ -611,7 +581,6 @@ function ReadItem({
             {reviewOpen ? "Hide review" : review.trim() ? "Edit review" : "Add review"}
             <IconChevronDown size={12} />
           </button>
-          <FormatPicker listened={!!book.listened} labels={["Read", "Listened"]} onChange={onSetListened} />
         </div>
         <div className={`review-box${reviewOpen ? " open" : ""}`}>
           <textarea
@@ -629,7 +598,7 @@ function ReadItem({
       </BookSummary>
       <div className="read-status">
         <StatusPicker
-          status={book.isReading ? "rereading" : "read"}
+          status={reading ? readingStatus(reading.listening, true) : readStatus(book.listened)}
           book={{ book_id: book.book_id }}
           onChange={onMoved}
         />
