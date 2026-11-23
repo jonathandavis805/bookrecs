@@ -374,6 +374,13 @@ textarea:focus {
   color: var(--on-accent);
 }
 
+/* Sideways touches slide between the options; up and down still scrolls. */
+.status-picker {
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 .status-picker button {
   min-width: 40px;
   min-height: 36px;
@@ -389,6 +396,46 @@ textarea:focus {
 
 .status-picker button:active:not(:disabled) {
   transform: scale(0.94);
+}
+
+.status-picker.sliding {
+  position: relative;
+}
+
+.status-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  opacity: 0;
+  transition:
+    transform 0.35s cubic-bezier(0.32, 0.72, 0, 1),
+    width 0.35s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.15s ease;
+}
+
+.status-thumb.tracking {
+  transition:
+    transform 0.08s ease-out,
+    width 0.2s ease-out;
+}
+
+.status-thumb.still {
+  transition: none;
+}
+
+.segmented.compact.sliding button.active:not(.also) {
+  background: transparent;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-thumb,
+  .status-thumb.tracking {
+    transition: none;
+  }
 }
 
 /* ---------- Tooltip ---------- */
@@ -1804,6 +1851,14 @@ textarea:focus {
 
   .book-row > .actions:has(.status-picker) .icon-btn {
     padding: 4px;
+  }
+
+  /* The last option sits near the screen edge. */
+  .status-picker .tooltip-anchor:last-child .tooltip {
+    right: 0;
+    left: auto;
+    animation: none;
+    transform: none;
   }
 
   .friend-row-head {

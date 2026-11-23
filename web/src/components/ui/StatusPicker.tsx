@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type PointerEvent, useLayoutEffect, useRef, useState } from "react";
 import { api, errorMessage, type MineStatus } from "../../api";
 import { IconBook, IconCheck, IconHeadphones, IconHeart, IconSwap } from "./icons";
 import { Tooltip } from "./Tooltip";
@@ -53,6 +53,105 @@ const SWAP_HINTS: Partial<Record<Pick, string>> = {
   listened: "Switch to listened",
 };
 
+// How far a finger moves before it's sliding rather than tapping.
+const SLIDE_START = 8;
+// How far outside the picker a sliding finger lets go of it.
+const SLIDE_AWAY = 40;
+
+// The pill behind the lit option. It glides between options and tracks a finger
+// sliding along them, previewing what each would do as hovering does with a
+// mouse. Letting go picks the option (`release` says whether it could); sliding
+// well away from the picker, or back to the resting option, changes nothing.
+function useSlidingThumb(resting: Status | null, status: MineStatus, release: (option: Status) => boolean) {
+  const [preview, setPreview] = useState<Status | null>(null);
+  const group = useRef<HTMLDivElement>(null);
+  const thumb = useRef<HTMLSpanElement>(null);
+  const startX = useRef<number | null>(null);
+  const slid = useRef(false);
+  const target = preview ?? resting;
+
+  // Each option's place in the group; the anchors aren't scaled while pressed.
+  const anchors = () => [...(group.current?.querySelectorAll<HTMLElement>(".tooltip-anchor") ?? [])];
+
+  function settle(to: Status | null) {
+    const pill = thumb.current;
+    const anchor = anchors()[OPTIONS.findIndex((o) => o.value === to)];
+    if (!pill) return;
+    pill.classList.remove("tracking");
+    if (!anchor) {
+      pill.style.opacity = "0";
+      return;
+    }
+    // Appearing from nowhere shouldn't glide in from the edge.
+    const still = pill.style.opacity !== "1";
+    pill.classList.toggle("still", still);
+    pill.style.width = `${anchor.offsetWidth}px`;
+    pill.style.transform = `translateX(${anchor.offsetLeft}px)`;
+    pill.style.opacity = "1";
+    if (still) void pill.offsetWidth;
+    pill.classList.remove("still");
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: status resizes the options
+  useLayoutEffect(() => {
+    if (!slid.current || startX.current === null) settle(target);
+    const observer = new ResizeObserver(() => startX.current === null && settle(target));
+    if (group.current) observer.observe(group.current);
+    return () => observer.disconnect();
+  }, [target, status]);
+
+  function track(x: number, y: number) {
+    const box = group.current?.getBoundingClientRect();
+    if (!box) return;
+    const away = Math.max(box.left - x, x - box.right, box.top - y, y - box.bottom);
+    if (away > SLIDE_AWAY) {
+      setPreview(null);
+      settle(resting);
+      return;
+    }
+    const pill = thumb.current;
+    const spots = anchors();
+    const last = spots.at(-1);
+    if (!pill || !group.current || !last) return;
+    const at = x - box.left - group.current.clientLeft;
+    const found = spots.findIndex((s) => at <= s.offsetLeft + s.offsetWidth);
+    const index = found === -1 ? spots.length - 1 : found;
+    const width = spots[index].offsetWidth;
+    const end = last.offsetLeft + last.offsetWidth - width;
+    pill.classList.add("tracking");
+    pill.style.width = `${width}px`;
+    pill.style.transform = `translateX(${Math.min(Math.max(at - width / 2, spots[0].offsetLeft), end)}px)`;
+    pill.style.opacity = "1";
+    setPreview(OPTIONS[index].value);
+  }
+
+  function end(chosen: Status | null) {
+    startX.current = null;
+    if (!slid.current) return;
+    setPreview(null);
+    settle(chosen && chosen !== resting && release(chosen) ? chosen : resting);
+  }
+
+  const handlers = {
+    onPointerDown(e: PointerEvent) {
+      slid.current = false;
+      startX.current = e.pointerType === "touch" ? e.clientX : null;
+    },
+    onPointerMove(e: PointerEvent) {
+      if (startX.current === null) return;
+      if (Math.abs(e.clientX - startX.current) > SLIDE_START) slid.current = true;
+      if (slid.current) track(e.clientX, e.clientY);
+    },
+    onPointerUp: () => end(preview),
+    onPointerCancel: () => end(null),
+    onClickCapture(e: { stopPropagation: () => void }) {
+      if (slid.current) e.stopPropagation();
+      slid.current = false;
+    },
+  };
+  return { preview, group, thumb, handlers };
+}
+
 // A plain choice of list, for a book that isn't on one yet.
 export function StatusChoice({ value, onChange }: { value: Status; onChange: (next: Status) => void }) {
   return (
@@ -86,11 +185,29 @@ export function StatusPicker({
   atLimit?: boolean;
   onChange: (next: MineStatus) => void;
 }) {
-  const [busy, setBusy] = useState(false);
+  // The option being saved; the pill moves there without waiting.
+  const [pending, setPending] = useState<Status | null>(null);
   const [error, setError] = useState("");
+  const shown = status ? STATUSES[status] : null;
+  const { preview, group, thumb, handlers } = useSlidingThumb(
+    pending ?? shown?.on ?? null,
+    status ?? null,
+    (option) => {
+      if (pending || unavailable(option)) return false;
+      pick(option, option);
+      return true;
+    },
+  );
 
-  async function pick(next: Pick) {
-    setBusy(true);
+  // The server keeps books you've read off the wishlist.
+  const alreadyRead = shown?.on === "read" || shown?.again;
+  function unavailable(option: Status): boolean {
+    return (option === "wish" && !!alreadyRead) || (option === "read" && atLimit && !shown);
+  }
+
+  async function pick(option: Status, next: Pick) {
+    if (pending) return;
+    setPending(option);
     setError("");
     try {
       const body = JSON.stringify({ ...book, status: next });
@@ -99,40 +216,40 @@ export function StatusPicker({
     } catch (e) {
       setError(errorMessage(e));
     } finally {
-      setBusy(false);
+      setPending(null);
     }
   }
-
-  const shown = status ? STATUSES[status] : null;
 
   return (
     <>
       {error && <span className="error-text">{error}</span>}
-      <div className="segmented compact status-picker">
+      <div ref={group} className="segmented compact status-picker sliding" {...handlers}>
+        <span ref={thumb} className="status-thumb" />
         {OPTIONS.map(({ value: option, Icon }) => {
           const current = shown?.on === option;
-          const limited = atLimit && !shown && option === "read";
-          // The server keeps books you've read off the wishlist.
-          const alreadyRead = option === "wish" && (shown?.on === "read" || shown?.again);
           const swap = current ? shown.swap : undefined;
           const hint = current
             ? swap
               ? SWAP_HINTS[swap]
               : "On your wishlist"
-            : limited
+            : option === "read" && unavailable(option)
               ? "Book limit reached"
               : moveHint(option, status ?? null);
           const OptionIcon = current && shown.audio ? IconHeadphones : Icon;
           const lit = current || (shown?.again && option === "read");
+          const target = preview ?? pending;
+          const highlighted = target ? target === option : lit;
+          // Rereading lights a second option, which the pill doesn't cover.
+          const also = highlighted && !target && !current;
           return (
-            <Tooltip key={option} label={hint}>
+            <Tooltip key={option} label={current && preview ? shown.label : hint} held={preview === option}>
               <button
                 type="button"
-                className={lit ? "active" : ""}
+                className={`${highlighted ? "active" : ""}${also ? " also" : ""}`}
                 aria-label={current ? (swap ? `${shown.label}. ${hint}` : shown.label) : hint}
                 aria-pressed={!!lit}
-                disabled={busy || limited || alreadyRead}
-                onClick={() => (current ? swap && pick(swap) : pick(option))}
+                disabled={unavailable(option)}
+                onClick={() => (current ? swap && pick(option, swap) : pick(option, option))}
               >
                 <OptionIcon />
                 {current && <span className="status-label">{shown.label}</span>}

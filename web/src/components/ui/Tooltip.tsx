@@ -6,7 +6,8 @@ const STAYS_WARM = 300;
 // When any tooltip last closed. Moving straight on to the next shows it at once, unanimated.
 let closedAt = 0;
 
-export function Tooltip({ label, children }: { label?: string; children: ReactNode }) {
+// `held` keeps it open for a touch.
+export function Tooltip({ label, held = false, children }: { label?: string; held?: boolean; children: ReactNode }) {
   const [shown, setShown] = useState<"delayed" | "instant" | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -38,8 +39,8 @@ export function Tooltip({ label, children }: { label?: string; children: ReactNo
       onKeyDown={(e) => e.key === "Escape" && close()}
     >
       {children}
-      {shown && (
-        <span className={`tooltip${shown === "delayed" ? " animated" : ""}`} role="tooltip">
+      {(shown || held) && (
+        <span className={`tooltip${!held && shown === "delayed" ? " animated" : ""}`} role="tooltip">
           {label}
         </span>
       )}
