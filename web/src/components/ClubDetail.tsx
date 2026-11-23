@@ -9,6 +9,7 @@ import {
   type SearchHit,
   type User,
 } from "../api";
+import { useBookSearch } from "../useBookSearch";
 import { Byline, Cover } from "./ui/Book";
 import { IconCheck, IconChevronLeft, IconClock, IconThumbsDown, IconThumbsUp, IconX } from "./ui/icons";
 import { ConfirmDialog, Modal } from "./ui/Modal";
@@ -694,30 +695,9 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
 
 function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: () => void }) {
   const [q, setQ] = useState("");
-  const [hits, setHits] = useState<SearchHit[]>([]);
-  const [searching, setSearching] = useState(false);
+  const { hits, searching, error: searchError } = useBookSearch(q, true);
   const [status, setStatus] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!q.trim()) {
-      setHits([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      setError("");
-      try {
-        const d = await api<{ results: SearchHit[] }>(`/api/books/search?mine=1&q=${encodeURIComponent(q.trim())}`);
-        setHits(d.results);
-      } catch (e) {
-        setError(errorMessage(e));
-      } finally {
-        setSearching(false);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [q]);
 
   async function nominate(hit: SearchHit) {
     setStatus((s) => ({ ...s, [hit.key]: "Nominating…" }));
@@ -729,7 +709,6 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
       });
       setStatus((s) => ({ ...s, [hit.key]: "Nominated" }));
       setQ("");
-      setHits([]);
       onNominated();
     } catch (e) {
       setStatus((s) => ({ ...s, [hit.key]: "" }));
@@ -743,7 +722,7 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your lists or Open Library…" />
         {searching && <span className="searching-indicator">Searching…</span>}
       </div>
-      {error && <div className="error">{error}</div>}
+      {(error || searchError) && <div className="error">{error || searchError}</div>}
       {hits.length > 0 && (
         <ul className="result-list">
           {hits.map((h) => {
