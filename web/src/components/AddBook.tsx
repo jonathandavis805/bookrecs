@@ -155,7 +155,7 @@ function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
     <section className="form-section">
       <h3 className="section-title">Can't find your book? Add it manually</h3>
 
-      <StatusChoice value={target} onChange={setTarget} labelled />
+      <StatusChoice value={target} onChange={setTarget} />
 
       {done && <div className="success">{done}</div>}
       {error && <div className="error">{error}</div>}

@@ -484,14 +484,14 @@ export async function backToWishlist(db: D1Database, userId: number, bookId: num
 
 // ---------- What a viewer already has, for marking a friend's books ----------
 
-// rereading: on both the read list and currently reading.
-export type MineStatus = "read" | "wish" | "reading" | "rereading" | null;
+// rereading and relistening: on both the read list and currently reading.
+export type MineStatus = "read" | "listened" | "wish" | "reading" | "listening" | "rereading" | "relistening" | null;
 
 export async function viewerOwnership(db: D1Database, viewerId: number): Promise<(bookId: number) => MineStatus> {
-  const rows = await queryAll<{ book_id: number; list: "read" | "wish" | "reading" }>(
+  const rows = await queryAll<{ book_id: number; status: Exclude<MineStatus, null> }>(
     db,
-    `SELECT book_id, 'reading' AS list FROM reading WHERE user_id = ?1
-     UNION ALL SELECT book_id, 'read' FROM reads WHERE user_id = ?1
+    `SELECT book_id, CASE listening WHEN 1 THEN 'listening' ELSE 'reading' END AS status FROM reading WHERE user_id = ?1
+     UNION ALL SELECT book_id, CASE listened WHEN 1 THEN 'listened' ELSE 'read' END FROM reads WHERE user_id = ?1
      UNION ALL SELECT book_id, 'wish' FROM wishlist WHERE user_id = ?1`,
     viewerId,
   );
@@ -499,19 +499,22 @@ export async function viewerOwnership(db: D1Database, viewerId: number): Promise
   const status = new Map<number, MineStatus>();
   for (const r of rows) {
     const known = status.get(r.book_id);
-    if (!known) status.set(r.book_id, r.list);
-    else if (known === "reading" && r.list === "read") status.set(r.book_id, "rereading");
+    const isRead = r.status === "read" || r.status === "listened";
+    if (!known) status.set(r.book_id, r.status);
+    else if (isRead && known === "reading") status.set(r.book_id, "rereading");
+    else if (isRead && known === "listening") status.set(r.book_id, "relistening");
   }
   return (bookId) => status.get(bookId) ?? null;
 }
 
 // Puts a book on one of the user's lists, moving it there from another. A book
-// already read stays on the read list when it is read again.
+// already read stays on the read list when it is read again. Naming the list a
+// book is already on sets its format there.
 export async function setStatus(
   db: D1Database,
   userId: number,
   ref: BookRef,
-  status: "reading" | "wish" | "read",
+  status: "reading" | "listening" | "wish" | "read" | "listened",
 ): Promise<Result<{ book: BookRow; mine: MineStatus }>> {
   const r = await resolveBook(db, ref);
   if (!r.ok) return r;
@@ -521,8 +524,11 @@ export async function setStatus(
   );
 
   let moved: Result = { ok: true };
-  if (status === "reading") {
+  if (status === "reading" || status === "listening") {
     if (!reading) moved = await addToReading(db, userId, { bookId });
+    if (moved.ok && (reading || status === "listening")) {
+      moved = await setListening(db, userId, bookId, status === "listening");
+    }
   } else if (status === "wish") {
     if (read) moved = fail("You've already read this — it's on your books list");
     else if (reading) moved = await backToWishlist(db, userId, bookId);
@@ -535,5 +541,8 @@ export async function setStatus(
     const { canAdd, limit } = await getBookAllowance(db, userId);
     moved = canAdd ? await insertRead(db, userId, bookId) : fail(`You have reached the maximum of ${limit} books`);
   }
-  return moved.ok ? { ...r, mine: status === "reading" && read ? "rereading" : status } : moved;
+  if (moved.ok && (status === "listened" || (status === "read" && read && !reading))) {
+    moved = await setListened(db, userId, bookId, status === "listened");
+  }
+  return moved.ok ? { ...r, mine: (await viewerOwnership(db, userId))(bookId) } : moved;
 }

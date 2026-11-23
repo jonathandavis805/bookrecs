@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Book, errorMessage, type MineStatus } from "../api";
 import { Byline } from "./ui/Book";
 import { IconBook, IconHeart } from "./ui/icons";
-import { StatusPicker } from "./ui/StatusPicker";
+import { readingStatus, readStatus, StatusPicker } from "./ui/StatusPicker";
 
 interface FriendActivity {
   username: string;
@@ -89,11 +89,9 @@ export default function BookDetail({ bookId }: { bookId: number }) {
 
   const { mine } = book;
   const status: MineStatus = mine.reading
-    ? mine.read
-      ? "rereading"
-      : "reading"
+    ? readingStatus(mine.reading.listening, !!mine.read)
     : mine.read
-      ? "read"
+      ? readStatus(mine.read.listened)
       : mine.wishlist
         ? "wish"
         : null;
@@ -166,7 +164,6 @@ export default function BookDetail({ bookId }: { bookId: number }) {
                   {mine.read.listened ? " · Listened" : ""}
                 </span>
               )}
-              {mine.reading?.listening ? <span className="badge accent">Listening</span> : null}
               {mine.wishlist?.owned ? <WishlistBadge owned /> : null}
             </div>
             {actionError && <div className="error-text">{actionError}</div>}

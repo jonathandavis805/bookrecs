@@ -77,6 +77,19 @@ export const IconGrip = (p: IconProps) => (
   </Icon>
 );
 
+export const IconHeadphones = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+    <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+  </Icon>
+);
+
+export const IconSwap = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m17 3 4 4-4 4M21 7H7M7 21l-4-4 4-4M3 17h14" />
+  </Icon>
+);
+
 export const IconBell = (p: IconProps) => (
   <Icon {...p}>
     <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />

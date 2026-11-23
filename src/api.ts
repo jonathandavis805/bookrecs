@@ -372,7 +372,9 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
 
   if (path === "/api/me/status" && method === "POST") {
     const { status, book_id, ol_key, year } = await readBody(req);
-    if (status !== "reading" && status !== "wish" && status !== "read") return json({ error: "Invalid status" }, 400);
+    if (!["reading", "listening", "wish", "read", "listened"].includes(status)) {
+      return json({ error: "Invalid status" }, 400);
+    }
     const ref = { bookId: optionalNumber(book_id), olKey: ol_key, year: optionalNumber(year) };
     const r = await core.setStatus(db, user.id, ref, status);
     return r.ok ? json({ book: r.book, mine: r.mine }) : failure(r);
