@@ -864,15 +864,6 @@ textarea:focus {
   margin-left: 0;
 }
 
-.actions-col {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.actions-col .icon-btn {
-  align-self: flex-end;
-}
-
 .public-col {
   display: flex;
   flex-direction: column;
@@ -917,15 +908,9 @@ textarea:focus {
   grid-area: info;
 }
 
-.read-row .actions-col {
+.read-row .actions {
   grid-area: actions;
-  flex-direction: row;
-  align-items: center;
   gap: 8px;
-}
-
-.read-row .actions-col .icon-btn {
-  align-self: center;
 }
 
 .read-row .public-col {
@@ -1664,16 +1649,6 @@ textarea:focus {
     width: 100%;
   }
 
-  .actions-col {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .actions-col .icon-btn {
-    align-self: center;
-  }
-
   .public-col {
     flex-direction: row;
     gap: 6px;
@@ -1686,10 +1661,6 @@ textarea:focus {
       "handle info info";
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 10px;
-  }
-
-  .read-row .actions-col .btn-sm {
-    display: none;
   }
 
   .friend-row-head {

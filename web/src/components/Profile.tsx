@@ -1,10 +1,11 @@
 import { Reorder, useDragControls } from "framer-motion";
-import { useEffect, useState } from "react";
+import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useState } from "react";
 import {
   api,
   type Book,
   type Category,
   errorMessage,
+  type ListItem,
   type NextUpItem,
   type ReadingItem,
   type User,
@@ -12,7 +13,7 @@ import {
 } from "../api";
 import { CategoryAdder, CategoryBar, CategoryTags } from "./Categories";
 import { Byline, Cover } from "./ui/Book";
-import { IconBook, IconCheck, IconChevronDown, IconGrip, IconHeart, IconUndo, IconX } from "./ui/icons";
+import { IconBook, IconChevronDown, IconGrip, IconHeart, IconUndo, IconX } from "./ui/icons";
 import { Switch } from "./ui/Switch";
 
 interface Props {
@@ -21,6 +22,7 @@ interface Props {
 }
 
 type Mine = "read" | "wish" | "reading" | null;
+type ListName = "books" | "wishlist" | "reading";
 type Format = "all" | "read" | "listened";
 
 export default function Profile({ username, me }: Props) {
@@ -37,7 +39,6 @@ export default function Profile({ username, me }: Props) {
   const [nextUp, setNextUp] = useState<NextUpItem | null>(null);
   const [readError, setReadError] = useState("");
   const [wishStatus, setWishStatus] = useState<Record<number, string>>({});
-  const [readingStatus, setReadingStatus] = useState<Record<number, string>>({});
 
   // Edit state for self
   const [reviews, setReviews] = useState<Record<number, string>>({});
@@ -124,139 +125,32 @@ export default function Profile({ username, me }: Props) {
     }
   }
 
-  async function toggleReadPublic(bookId: number, next: boolean) {
-    setBooks((b) => (b ? b.map((x) => (x.book_id === bookId ? { ...x, public: next ? 1 : 0 } : x)) : b));
+  // `flag` is both the book's field and the route that sets it.
+  async function setFlag<T extends ListItem>(
+    list: ListName,
+    setList: Dispatch<SetStateAction<T[] | null>>,
+    bookId: number,
+    flag: keyof T & string,
+    next: boolean,
+  ) {
+    setList((l) => l?.map((x) => (x.book_id === bookId ? { ...x, [flag]: next ? 1 : 0 } : x)) ?? null);
     try {
-      await api(`/api/me/books/${bookId}/public`, {
-        method: "POST",
-        body: JSON.stringify({ public: next }),
-      });
+      await api(`/api/me/${list}/${bookId}/${flag}`, { method: "POST", body: JSON.stringify({ [flag]: next }) });
     } catch (e) {
       setReadError(errorMessage(e));
     }
   }
 
-  async function setListened(bookId: number, next: boolean) {
-    setBooks((b) => (b ? b.map((x) => (x.book_id === bookId ? { ...x, listened: next ? 1 : 0 } : x)) : b));
+  async function move(path: string, method: "POST" | "DELETE" = "POST", body: object = {}) {
     try {
-      await api(`/api/me/books/${bookId}/listened`, {
-        method: "POST",
-        body: JSON.stringify({ listened: next }),
-      });
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
-
-  async function toggleOwned(item: WishlistItem) {
-    const next = !item.owned;
-    setWish((w) => (w ? w.map((x) => (x.book_id === item.book_id ? { ...x, owned: next ? 1 : 0 } : x)) : w));
-    try {
-      await api(`/api/me/wishlist/${item.book_id}/owned`, {
-        method: "POST",
-        body: JSON.stringify({ owned: next }),
-      });
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
-
-  async function toggleWishPublic(item: WishlistItem) {
-    const next = !item.public;
-    setWish((w) => (w ? w.map((x) => (x.book_id === item.book_id ? { ...x, public: next ? 1 : 0 } : x)) : w));
-    try {
-      await api(`/api/me/wishlist/${item.book_id}/public`, {
-        method: "POST",
-        body: JSON.stringify({ public: next }),
-      });
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
-
-  async function startReading(bookId: number) {
-    try {
-      await api("/api/me/reading", { method: "POST", body: JSON.stringify({ book_id: bookId }) });
+      await api(`/api/me/${path}`, { method, body: JSON.stringify(body) });
       await reloadMine();
     } catch (e) {
       setReadError(errorMessage(e));
     }
   }
 
-  async function removeRead(bookId: number) {
-    try {
-      await api(`/api/me/books/${bookId}`, { method: "DELETE" });
-      setBooks((b) => (b ? b.filter((x) => x.book_id !== bookId) : b));
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
-
-  async function removeWish(bookId: number) {
-    try {
-      await api(`/api/me/wishlist/${bookId}`, { method: "DELETE" });
-      setWish((w) => (w ? w.filter((x) => x.book_id !== bookId) : w));
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
-
-  async function startReadingFromNextUp(bookId: number) {
-    try {
-      await api("/api/me/reading/from-wishlist", { method: "POST", body: JSON.stringify({ book_id: bookId }) });
-      await reloadMine();
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
-
-  async function removeReading(bookId: number) {
-    try {
-      await api(`/api/me/reading/${bookId}`, { method: "DELETE" });
-      await reloadMine();
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
-
-  async function finishReading(item: ReadingItem) {
-    try {
-      await api(`/api/me/reading/${item.book_id}/finish`, { method: "POST", body: "{}" });
-      await reloadMine();
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
-
-  async function setListening(bookId: number, next: boolean) {
-    setReading((r) => (r ? r.map((x) => (x.book_id === bookId ? { ...x, listening: next ? 1 : 0 } : x)) : r));
-    try {
-      await api(`/api/me/reading/${bookId}/listening`, {
-        method: "POST",
-        body: JSON.stringify({ listening: next }),
-      });
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
-
-  async function backToWishlist(item: ReadingItem) {
-    try {
-      await api(`/api/me/reading/${item.book_id}/back-to-wishlist`, { method: "POST", body: "{}" });
-      await reloadMine();
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
-
-  async function moveToRead(item: WishlistItem) {
-    try {
-      await api(`/api/me/wishlist/${item.book_id}/move-to-read`, { method: "POST", body: "{}" });
-      await reloadMine();
-    } catch (e) {
-      setReadError(errorMessage(e));
-    }
-  }
+  const remove = (list: ListName, bookId: number) => move(`${list}/${bookId}`, "DELETE");
 
   // When filtered, newOrder is just the shown books: they swap among the overall
   // slots they hold. The category route does the same server side; with a
@@ -394,16 +288,6 @@ export default function Profile({ username, me }: Props) {
     }
   }
 
-  async function addReading(bookId: number) {
-    setReadingStatus((s) => ({ ...s, [bookId]: "Adding…" }));
-    try {
-      await api("/api/me/reading", { method: "POST", body: JSON.stringify({ book_id: bookId }) });
-      setReadingStatus((s) => ({ ...s, [bookId]: "Reading" }));
-    } catch (e) {
-      setReadingStatus((s) => ({ ...s, [bookId]: errorMessage(e) }));
-    }
-  }
-
   function actions(bookId: number, mine: Mine | undefined) {
     if (isSelf) return null;
 
@@ -411,27 +295,9 @@ export default function Profile({ username, me }: Props) {
       return <span className="muted">In your reading</span>;
     }
 
-    const r = readingStatus[bookId];
     const w = wishStatus[bookId];
 
-    const readingBtn =
-      r === "Reading" ? (
-        <span className="success-text">Reading</span>
-      ) : r && r !== "Adding…" ? (
-        <span className="error-text">{r}</span>
-      ) : (
-        <button type="button" onClick={() => addReading(bookId)} disabled={r === "Adding…"}>
-          {r === "Adding…" ? (
-            "…"
-          ) : (
-            <>
-              <IconBook /> Reading
-            </>
-          )}
-        </button>
-      );
-
-    let wishBtn: React.ReactNode;
+    let wishBtn: ReactNode;
     if (mine === "read") wishBtn = <span className="muted">In your books</span>;
     else if (mine === "wish") wishBtn = <span className="muted">In your wishlist</span>;
     else if (w === "Saved") wishBtn = <span className="success-text">Saved</span>;
@@ -449,12 +315,7 @@ export default function Profile({ username, me }: Props) {
         </button>
       );
 
-    return (
-      <>
-        {readingBtn}
-        {wishBtn}
-      </>
-    );
+    return wishBtn;
   }
 
   return (
@@ -473,44 +334,35 @@ export default function Profile({ username, me }: Props) {
           ) : reading.length === 0 ? (
             <div className="empty muted">
               {isSelf
-                ? 'Nothing here. Mark a book "Reading" to track what you\'re on.'
+                ? 'Nothing here. Open a book and pick "Start reading" to track what you\'re on.'
                 : `${username} isn't reading anything right now.`}
             </div>
           ) : (
             <ul className="book-list">
               {reading.map((b) => (
                 <li key={b.book_id} className="book-row">
-                  <Cover url={b.cover_url} />
-                  <div className="info">
-                    <div className="title">
-                      <a href={`#/book/${b.book_id}`} className="book-title-link">
-                        {b.title}
-                      </a>
-                      {b.manual ? <span className="badge">manual</span> : null}
-                      {!isSelf && b.listening ? <span className="badge">Listening</span> : null}
-                    </div>
-                    <Byline author={b.author} year={b.first_publish_year} />
-                    <CategoryTags
-                      categories={categories}
-                      ids={b.category_ids}
-                      onChange={isSelf ? (ids) => setBookCategories(b.book_id, ids) : undefined}
-                    />
+                  <BookSummary
+                    book={b}
+                    badge={!isSelf && b.listening ? <span className="badge">Listening</span> : null}
+                    categories={categories}
+                    onSetCategories={isSelf ? (ids) => setBookCategories(b.book_id, ids) : undefined}
+                  >
                     {isSelf && (
                       <div className="toggle-row">
                         <FormatPicker
                           listened={!!b.listening}
                           labels={["Reading", "Listening"]}
-                          onChange={(next) => setListening(b.book_id, next)}
+                          onChange={(next) => setFlag("reading", setReading, b.book_id, "listening", next)}
                         />
                       </div>
                     )}
-                  </div>
+                  </BookSummary>
                   {isSelf ? (
                     <div className="actions">
                       <button
                         type="button"
                         className="btn-sm"
-                        onClick={() => finishReading(b)}
+                        onClick={() => move(`reading/${b.book_id}/finish`)}
                         title="Finished — move to Books read"
                       >
                         Finished
@@ -518,20 +370,12 @@ export default function Profile({ username, me }: Props) {
                       <button
                         type="button"
                         className="btn-sm"
-                        onClick={() => backToWishlist(b)}
+                        onClick={() => move(`reading/${b.book_id}/back-to-wishlist`)}
                         title="Back to wishlist"
                       >
                         <IconUndo /> Wishlist
                       </button>
-                      <button
-                        type="button"
-                        className="icon-btn remove"
-                        onClick={() => removeReading(b.book_id)}
-                        title="Remove"
-                        aria-label="Remove"
-                      >
-                        <IconX />
-                      </button>
+                      <RemoveButton onClick={() => remove("reading", b.book_id)} />
                     </div>
                   ) : (
                     <div className="actions">{actions(b.book_id, b.mine)}</div>
@@ -546,29 +390,20 @@ export default function Profile({ username, me }: Props) {
               <h3 className="subsection-title">Next up</h3>
               <ul className="book-list">
                 <li className="book-row">
-                  <Cover url={nextUp.cover_url} />
-                  <div className="info">
-                    <div className="title">
-                      <a href={`#/book/${nextUp.book_id}`} className="book-title-link">
-                        {nextUp.title}
-                      </a>
-                      {nextUp.manual ? <span className="badge">manual</span> : null}
-                    </div>
-                    <Byline author={nextUp.author} year={nextUp.first_publish_year} />
+                  <BookSummary book={nextUp}>
                     <div className="author">
                       {nextUp.reason === "owned"
                         ? `You own this · #${nextUp.rank} on wishlist`
                         : `${nextUp.friendUsername} has this · #${nextUp.rank} on wishlist`}
                     </div>
-                  </div>
+                  </BookSummary>
                   <div className="actions">
                     <button
                       type="button"
                       className="btn-sm"
-                      onClick={() => startReadingFromNextUp(nextUp.book_id)}
-                      title="Start reading"
+                      onClick={() => move("reading/from-wishlist", "POST", { book_id: nextUp.book_id })}
                     >
-                      <IconBook /> Reading
+                      <IconBook /> Start reading
                     </button>
                   </div>
                 </li>
@@ -624,10 +459,9 @@ export default function Profile({ username, me }: Props) {
                     setDirty((d) => ({ ...d, [b.book_id]: true }));
                   }}
                   onSaveReview={() => saveReview(b.book_id)}
-                  onTogglePublic={(next) => toggleReadPublic(b.book_id, next)}
-                  onSetListened={(next) => setListened(b.book_id, next)}
-                  onStartReading={() => startReading(b.book_id)}
-                  onRemove={() => removeRead(b.book_id)}
+                  onTogglePublic={(next) => setFlag("books", setBooks, b.book_id, "public", next)}
+                  onSetListened={(next) => setFlag("books", setBooks, b.book_id, "listened", next)}
+                  onRemove={() => remove("books", b.book_id)}
                 />
               ))}
             </Reorder.Group>
@@ -636,19 +470,14 @@ export default function Profile({ username, me }: Props) {
               {shown.map((b, i) => (
                 <li key={b.book_id} className="book-row">
                   <span className="rank">#{i + 1}</span>
-                  <Cover url={b.cover_url} />
-                  <div className="info">
-                    <div className="title">
-                      <a href={`#/book/${b.book_id}`} className="book-title-link">
-                        {b.title}
-                      </a>
-                      {b.listened ? <span className="badge">Listened</span> : null}
-                    </div>
-                    <Byline author={b.author} year={b.first_publish_year} />
-                    <OverallRank rank={overall(b)} />
-                    <CategoryTags categories={categories} ids={b.category_ids} />
+                  <BookSummary
+                    book={b}
+                    badge={b.listened ? <span className="badge">Listened</span> : null}
+                    overall={overall(b)}
+                    categories={categories}
+                  >
                     {b.review && <div className="review-text">{b.review}</div>}
-                  </div>
+                  </BookSummary>
                   <div className="actions">{actions(b.book_id, b.mine)}</div>
                 </li>
               ))}
@@ -679,15 +508,13 @@ export default function Profile({ username, me }: Props) {
                 <WishItem
                   key={b.book_id}
                   item={b}
-                  index={i}
+                  rank={i + 1}
                   overall={overallWish(b)}
                   categories={categories}
                   onSetCategories={(ids) => setBookCategories(b.book_id, ids)}
-                  onToggleOwned={() => toggleOwned(b)}
-                  onTogglePublic={() => toggleWishPublic(b)}
-                  onStartReading={() => startReading(b.book_id)}
-                  onMoveToRead={() => moveToRead(b)}
-                  onRemove={() => removeWish(b.book_id)}
+                  onSetOwned={(next) => setFlag("wishlist", setWish, b.book_id, "owned", next)}
+                  onTogglePublic={(next) => setFlag("wishlist", setWish, b.book_id, "public", next)}
+                  onRemove={() => remove("wishlist", b.book_id)}
                 />
               ))}
             </Reorder.Group>
@@ -695,18 +522,9 @@ export default function Profile({ username, me }: Props) {
             <ul className="book-list">
               {shownWish.map((b) => (
                 <li key={b.book_id} className="book-row">
-                  <Cover url={b.cover_url} />
-                  <div className="info">
-                    <div className="title">
-                      <a href={`#/book/${b.book_id}`} className="book-title-link">
-                        {b.title}
-                      </a>
-                      {b.manual ? <span className="badge">manual</span> : null}
-                    </div>
-                    <Byline author={b.author} year={b.first_publish_year} />
-                    <CategoryTags categories={categories} ids={b.category_ids} />
+                  <BookSummary book={b} categories={categories}>
                     {b.owned ? <div className="author">Owned</div> : null}
-                  </div>
+                  </BookSummary>
                   <div className="actions">{actions(b.book_id, b.mine)}</div>
                 </li>
               ))}
@@ -746,8 +564,84 @@ function FormatPicker({
   );
 }
 
-function OverallRank({ rank }: { rank?: number }) {
-  return rank ? <div className="small-label">#{rank} overall</div> : null;
+function RemoveButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" className="icon-btn remove" onClick={onClick} title="Remove" aria-label="Remove">
+      <IconX />
+    </button>
+  );
+}
+
+function BookSummary({
+  book,
+  badge,
+  overall,
+  categories = [],
+  onSetCategories,
+  children,
+}: {
+  book: ListItem;
+  badge?: ReactNode;
+  overall?: number;
+  categories?: Category[];
+  onSetCategories?: (ids: number[]) => void;
+  children?: ReactNode;
+}) {
+  return (
+    <>
+      <Cover url={book.cover_url} />
+      <div className="info">
+        <div className="title">
+          <a href={`#/book/${book.book_id}`} className="book-title-link">
+            {book.title}
+          </a>
+          {book.manual ? <span className="badge">manual</span> : null}
+          {badge}
+        </div>
+        <Byline author={book.author} year={book.first_publish_year} />
+        {overall ? <div className="small-label">#{overall} overall</div> : null}
+        <CategoryTags categories={categories} ids={book.category_ids} onChange={onSetCategories} />
+        {children}
+      </div>
+    </>
+  );
+}
+
+function SortableRow({
+  item,
+  rank,
+  className = "",
+  children,
+}: {
+  item: ListItem;
+  rank: number;
+  className?: string;
+  children: ReactNode;
+}) {
+  const controls = useDragControls();
+
+  return (
+    <Reorder.Item
+      value={item}
+      as="li"
+      dragListener={false}
+      dragControls={controls}
+      className={`book-row ${className}`}
+      whileDrag={DRAGGING}
+    >
+      <button
+        type="button"
+        className="drag-handle"
+        onPointerDown={(e) => controls.start(e)}
+        title="Drag to reorder"
+        aria-label="Drag to reorder"
+      >
+        <IconGrip size={18} />
+      </button>
+      <span className="rank">#{rank}</span>
+      {children}
+    </Reorder.Item>
+  );
 }
 
 function ReadItem({
@@ -763,7 +657,6 @@ function ReadItem({
   onSaveReview,
   onTogglePublic,
   onSetListened,
-  onStartReading,
   onRemove,
 }: {
   book: Book;
@@ -778,43 +671,19 @@ function ReadItem({
   onSaveReview: () => void;
   onTogglePublic: (next: boolean) => void;
   onSetListened: (next: boolean) => void;
-  onStartReading: () => void;
   onRemove: () => void;
 }) {
-  const controls = useDragControls();
   const [reviewOpen, setReviewOpen] = useState(false);
 
   return (
-    <Reorder.Item
-      value={book}
-      as="li"
-      dragListener={false}
-      dragControls={controls}
-      className="book-row read-row"
-      whileDrag={DRAGGING}
-    >
-      <button
-        type="button"
-        className="drag-handle"
-        onPointerDown={(e) => controls.start(e)}
-        title="Drag to reorder"
-        aria-label="Drag to reorder"
+    <SortableRow item={book} rank={rank} className="read-row">
+      <BookSummary
+        book={book}
+        badge={book.isReading ? <span className="badge accent">Reading</span> : null}
+        overall={overall}
+        categories={categories}
+        onSetCategories={onSetCategories}
       >
-        <IconGrip size={18} />
-      </button>
-      <span className="rank">#{rank}</span>
-      <Cover url={book.cover_url} />
-      <div className="info">
-        <div className="title">
-          <a href={`#/book/${book.book_id}`} className="book-title-link">
-            {book.title}
-          </a>
-          {book.manual ? <span className="badge">manual</span> : null}
-          {book.isReading ? <span className="badge accent">Reading</span> : null}
-        </div>
-        <Byline author={book.author} year={book.first_publish_year} />
-        <OverallRank rank={overall} />
-        <CategoryTags categories={categories} ids={book.category_ids} onChange={onSetCategories} />
         <div className="review-row">
           <button
             type="button"
@@ -839,102 +708,48 @@ function ReadItem({
             </button>
           )}
         </div>
-      </div>
-      <div className="actions actions-col">
-        <button
-          type="button"
-          className="btn-sm"
-          onClick={onStartReading}
-          title={book.isReading ? "Already currently reading" : "Currently reading"}
-          disabled={book.isReading}
-        >
-          {book.isReading ? <IconCheck /> : <IconBook />} Reading
-        </button>
+      </BookSummary>
+      <div className="actions">
         <div className="public-col">
           <Switch checked={!!book.public} onChange={onTogglePublic} title="Visible to friends" />
           <span className="small-label">{book.public ? "Public" : "Private"}</span>
         </div>
-        <button type="button" className="icon-btn remove" onClick={onRemove} title="Remove" aria-label="Remove">
-          <IconX />
-        </button>
+        <RemoveButton onClick={onRemove} />
       </div>
-    </Reorder.Item>
+    </SortableRow>
   );
 }
 
 function WishItem({
   item,
-  index,
+  rank,
   overall,
   categories,
   onSetCategories,
-  onToggleOwned,
+  onSetOwned,
   onTogglePublic,
-  onStartReading,
-  onMoveToRead,
   onRemove,
 }: {
   item: WishlistItem;
-  index: number;
+  rank: number;
   overall?: number;
   categories: Category[];
   onSetCategories: (ids: number[]) => void;
-  onToggleOwned: () => void;
-  onTogglePublic: () => void;
-  onStartReading: () => void;
-  onMoveToRead: () => void;
+  onSetOwned: (next: boolean) => void;
+  onTogglePublic: (next: boolean) => void;
   onRemove: () => void;
 }) {
-  const controls = useDragControls();
-
   return (
-    <Reorder.Item
-      value={item}
-      as="li"
-      dragListener={false}
-      dragControls={controls}
-      className="book-row"
-      whileDrag={DRAGGING}
-    >
-      <button
-        type="button"
-        className="drag-handle"
-        onPointerDown={(e) => controls.start(e)}
-        title="Drag to reorder"
-        aria-label="Drag to reorder"
-      >
-        <IconGrip size={18} />
-      </button>
-      <span className="rank">#{index + 1}</span>
-      <Cover url={item.cover_url} />
-      <div className="info">
-        <div className="title">
-          <a href={`#/book/${item.book_id}`} className="book-title-link">
-            {item.title}
-          </a>
-          {item.manual ? <span className="badge">manual</span> : null}
-        </div>
-        <Byline author={item.author} year={item.first_publish_year} />
-        <OverallRank rank={overall} />
-        <CategoryTags categories={categories} ids={item.category_ids} onChange={onSetCategories} />
+    <SortableRow item={item} rank={rank}>
+      <BookSummary book={item} overall={overall} categories={categories} onSetCategories={onSetCategories}>
         <div className="toggle-row">
           <span className="muted">Owned</span>
-          <Switch checked={!!item.owned} onChange={onToggleOwned} title="Mark as owned" />
+          <Switch checked={!!item.owned} onChange={onSetOwned} title="Mark as owned" />
           <span className="muted">Public</span>
           <Switch checked={!!item.public} onChange={onTogglePublic} title="Visible to friends" />
         </div>
-      </div>
-      <div className="actions actions-col">
-        <button type="button" className="btn-sm" onClick={onStartReading} title="Start reading">
-          <IconBook /> Reading
-        </button>
-        <button type="button" className="btn-sm" onClick={onMoveToRead} title="Finished — move to Books read">
-          Finished
-        </button>
-        <button type="button" className="icon-btn remove" onClick={onRemove} title="Remove" aria-label="Remove">
-          <IconX />
-        </button>
-      </div>
-    </Reorder.Item>
+      </BookSummary>
+      <RemoveButton onClick={onRemove} />
+    </SortableRow>
   );
 }

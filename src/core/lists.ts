@@ -3,31 +3,28 @@ import { BOOK_COLUMNS, type BookRef, type BookRow, resolveBook } from "./books";
 import { FRIEND_IDS } from "./friends";
 import { fail, notFound, type Result } from "./result";
 
-export interface ReadRow extends BookRow {
+interface ListRow extends BookRow {
   book_id: number;
-  rank: number;
   category_ids: number[];
+  created_at: number;
+}
+
+export interface ReadRow extends ListRow {
+  rank: number;
   review: string | null;
   public: number;
   listened: number;
-  created_at: number;
   updated_at: number;
 }
 
-export interface WishlistRow extends BookRow {
-  book_id: number;
+export interface WishlistRow extends ListRow {
   owned: number;
   public: number;
   rank: number;
-  category_ids: number[];
-  created_at: number;
 }
 
-export interface ReadingRow extends BookRow {
-  book_id: number;
-  category_ids: number[];
+export interface ReadingRow extends ListRow {
   listening: number;
-  created_at: number;
 }
 
 export interface NextUpRow extends WishlistRow {
@@ -193,6 +190,12 @@ async function insertRead(db: D1Database, userId: number, bookId: number, opts: 
   return { ok: true };
 }
 
+// For a book finished from another list, which may be a reread.
+async function ensureRead(db: D1Database, userId: number, bookId: number, opts: ReadOptions): Promise<Result> {
+  if (await onList(db, "reads", userId, bookId)) return { ok: true };
+  return await insertRead(db, userId, bookId, opts);
+}
+
 export async function addRead(
   db: D1Database,
   userId: number,
@@ -309,10 +312,8 @@ export async function moveToRead(
     bookId,
   );
   if (!wish) return notFound("Not on your wishlist");
-  if (!(await onList(db, "reads", userId, bookId))) {
-    const r = await insertRead(db, userId, bookId, { ...opts, isPublic: wish.public === 1 });
-    if (!r.ok) return r;
-  }
+  const r = await ensureRead(db, userId, bookId, { ...opts, isPublic: wish.public === 1 });
+  if (!r.ok) return r;
   await removeFromWishlist(db, userId, bookId);
   return { ok: true };
 }
@@ -449,10 +450,8 @@ export async function finishReading(
     bookId,
   );
   if (!reading) return notFound("Not currently reading");
-  if (!(await onList(db, "reads", userId, bookId))) {
-    const r = await insertRead(db, userId, bookId, { ...opts, listened: reading.listening === 1 });
-    if (!r.ok) return r;
-  }
+  const r = await ensureRead(db, userId, bookId, { ...opts, listened: reading.listening === 1 });
+  if (!r.ok) return r;
   await deleteReading(db, userId, bookId);
   return { ok: true };
 }

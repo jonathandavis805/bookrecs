@@ -8,7 +8,7 @@ export interface User {
   theme?: unknown; // validated by adoptAccountTheme
 }
 
-export interface Book {
+export interface ListItem {
   id: number;
   book_id: number;
   ol_key: string;
@@ -17,16 +17,19 @@ export interface Book {
   cover_url: string | null;
   first_publish_year: number | null;
   manual: number;
+  category_ids: number[];
+  created_at: number;
+  mine?: "read" | "wish" | "reading" | null;
+}
+
+export interface Book extends ListItem {
   rank: number;
   review: string | null;
   public: number;
   listened: number;
-  created_at: number;
   updated_at: number;
-  mine?: "read" | "wish" | "reading" | null;
   isReading?: boolean;
   synopsis?: string | null;
-  category_ids: number[];
 }
 
 export interface Category {
@@ -45,21 +48,10 @@ export interface SearchHit {
   mine?: "read" | "reading" | "wishlist";
 }
 
-export interface WishlistItem {
-  book_id: number;
+export interface WishlistItem extends ListItem {
   owned: number;
   public: number;
   rank: number;
-  category_ids: number[];
-  created_at: number;
-  id: number;
-  ol_key: string;
-  title: string;
-  author: string | null;
-  cover_url: string | null;
-  first_publish_year: number | null;
-  manual: number;
-  mine?: "read" | "wish" | "reading" | null;
 }
 
 export interface NextUpItem extends WishlistItem {
@@ -67,19 +59,8 @@ export interface NextUpItem extends WishlistItem {
   friendUsername?: string;
 }
 
-export interface ReadingItem {
-  book_id: number;
+export interface ReadingItem extends ListItem {
   listening: number;
-  category_ids: number[];
-  created_at: number;
-  id: number;
-  ol_key: string;
-  title: string;
-  author: string | null;
-  cover_url: string | null;
-  first_publish_year: number | null;
-  manual: number;
-  mine?: "read" | "wish" | "reading" | null;
 }
 
 interface ClubPick {
