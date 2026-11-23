@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, errorMessage } from "../api";
+import { api, errorMessage, type MineStatus } from "../api";
 import { useBookSearch } from "../useBookSearch";
 import { Byline, Cover } from "./ui/Book";
 import { IconCheck } from "./ui/icons";
@@ -52,7 +52,7 @@ function SearchPane({ atLimit, onBookAdded }: Omit<PaneProps, "bookLimit">) {
   const [q, setQ] = useState("");
   const { hits, searched, searching, error } = useBookSearch(q);
   // Books moved between my lists since the search ran.
-  const [moved, setMoved] = useState<Record<string, Status>>({});
+  const [moved, setMoved] = useState<Record<string, MineStatus>>({});
 
   return (
     <section className="add-section">

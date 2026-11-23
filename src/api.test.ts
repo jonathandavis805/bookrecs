@@ -179,9 +179,10 @@ describe("status", () => {
       expect(await lists()).toEqual([list]);
     }
     expect((await set("wish")).status).toBe(400);
-    await set("reading");
+    expect((await set("reading")).data.mine).toBe("rereading");
     expect(await lists()).toEqual(["read", "reading"]);
-    await set("read");
+    expect((await set("wish")).status).toBe(400);
+    expect((await set("read")).data.mine).toBe("read");
     expect(await lists()).toEqual(["read"]);
     expect((await set("owned")).status).toBe(400);
   });

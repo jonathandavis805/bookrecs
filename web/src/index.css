@@ -940,9 +940,9 @@ textarea:focus {
 .read-row {
   display: grid;
   grid-template-areas:
-    "handle cover rank actions"
-    "handle cover info info";
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+    "handle cover rank status actions"
+    "handle cover info info info";
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px 14px;
 }
@@ -963,6 +963,15 @@ textarea:focus {
 
 .read-row .info {
   grid-area: info;
+}
+
+.read-status {
+  display: flex;
+  flex-wrap: wrap;
+  grid-area: status;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .read-row .actions {
@@ -1758,7 +1767,8 @@ textarea:focus {
   .read-row {
     grid-template-areas:
       "handle rank actions"
-      "handle info info";
+      "handle info info"
+      "handle status status";
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 10px;
   }

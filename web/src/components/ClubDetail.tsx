@@ -740,7 +740,11 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
                     {h.title}
                     {h.mine && (
                       <span className="badge">
-                        {h.mine === "reading" ? "Reading" : h.mine === "wish" ? "Wishlist" : "Read"}
+                        {h.mine === "reading" || h.mine === "rereading"
+                          ? "Reading"
+                          : h.mine === "wish"
+                            ? "Wishlist"
+                            : "Read"}
                       </span>
                     )}
                   </div>

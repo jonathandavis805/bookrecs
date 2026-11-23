@@ -14,9 +14,9 @@ import {
 } from "../api";
 import { CategoryAdder, CategoryBar, CategoryTags } from "./Categories";
 import { Byline, Cover } from "./ui/Book";
-import { IconBook, IconChevronDown, IconUndo } from "./ui/icons";
+import { IconBook, IconChevronDown } from "./ui/icons";
 import { RemoveButton, SortableRow } from "./ui/SortableRow";
-import { type Status, StatusPicker } from "./ui/StatusPicker";
+import { StatusPicker } from "./ui/StatusPicker";
 import { Switch } from "./ui/Switch";
 
 interface Props {
@@ -41,7 +41,7 @@ export default function Profile({ username, me }: Props) {
   const [nextUp, setNextUp] = useState<NextUpItem | null>(null);
   const [readError, setReadError] = useState("");
   // Books moved between my lists since a friend's lists were loaded.
-  const [moved, setMoved] = useState<Record<number, Status>>({});
+  const [moved, setMoved] = useState<Record<number, MineStatus>>({});
 
   // Edit state for self
   const [reviews, setReviews] = useState<Record<number, string>>({});
@@ -152,6 +152,10 @@ export default function Profile({ username, me }: Props) {
       setReadError(errorMessage(e));
     }
   }
+
+  const refreshMine = () => {
+    reloadMine().catch((e) => setReadError(errorMessage(e)));
+  };
 
   const remove = (list: ListName, bookId: number) => move(`${list}/${bookId}`, "DELETE");
 
@@ -333,22 +337,11 @@ export default function Profile({ username, me }: Props) {
                   </BookSummary>
                   {isSelf ? (
                     <div className="actions">
-                      <button
-                        type="button"
-                        className="btn-sm"
-                        onClick={() => move(`reading/${b.book_id}/finish`)}
-                        title="Finished — move to Books read"
-                      >
-                        Finished
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-sm"
-                        onClick={() => move(`reading/${b.book_id}/back-to-wishlist`)}
-                        title="Back to wishlist"
-                      >
-                        <IconUndo /> Wishlist
-                      </button>
+                      <StatusPicker
+                        status={books?.some((r) => r.book_id === b.book_id) ? "rereading" : "reading"}
+                        book={{ book_id: b.book_id }}
+                        onChange={refreshMine}
+                      />
                       <RemoveButton onClick={() => remove("reading", b.book_id)} />
                     </div>
                   ) : (
@@ -435,6 +428,7 @@ export default function Profile({ username, me }: Props) {
                   onSaveReview={() => saveReview(b.book_id)}
                   onTogglePublic={(next) => setFlag("books", setBooks, b.book_id, "public", next)}
                   onSetListened={(next) => setFlag("books", setBooks, b.book_id, "listened", next)}
+                  onMoved={refreshMine}
                   onRemove={() => remove("books", b.book_id)}
                 />
               ))}
@@ -488,6 +482,7 @@ export default function Profile({ username, me }: Props) {
                   onSetCategories={(ids) => setBookCategories(b.book_id, ids)}
                   onSetOwned={(next) => setFlag("wishlist", setWish, b.book_id, "owned", next)}
                   onTogglePublic={(next) => setFlag("wishlist", setWish, b.book_id, "public", next)}
+                  onMoved={refreshMine}
                   onRemove={() => remove("wishlist", b.book_id)}
                 />
               ))}
@@ -584,6 +579,7 @@ function ReadItem({
   onSaveReview,
   onTogglePublic,
   onSetListened,
+  onMoved,
   onRemove,
 }: {
   book: Book;
@@ -598,19 +594,14 @@ function ReadItem({
   onSaveReview: () => void;
   onTogglePublic: (next: boolean) => void;
   onSetListened: (next: boolean) => void;
+  onMoved: () => void;
   onRemove: () => void;
 }) {
   const [reviewOpen, setReviewOpen] = useState(false);
 
   return (
     <SortableRow item={book} rank={rank} className="read-row">
-      <BookSummary
-        book={book}
-        badge={book.isReading ? <span className="badge accent">Reading</span> : null}
-        overall={overall}
-        categories={categories}
-        onSetCategories={onSetCategories}
-      >
+      <BookSummary book={book} overall={overall} categories={categories} onSetCategories={onSetCategories}>
         <div className="review-row">
           <button
             type="button"
@@ -636,6 +627,13 @@ function ReadItem({
           )}
         </div>
       </BookSummary>
+      <div className="read-status">
+        <StatusPicker
+          status={book.isReading ? "rereading" : "read"}
+          book={{ book_id: book.book_id }}
+          onChange={onMoved}
+        />
+      </div>
       <div className="actions">
         <div className="public-col">
           <Switch checked={!!book.public} onChange={onTogglePublic} title="Visible to friends" />
@@ -655,6 +653,7 @@ function WishItem({
   onSetCategories,
   onSetOwned,
   onTogglePublic,
+  onMoved,
   onRemove,
 }: {
   item: WishlistItem;
@@ -664,6 +663,7 @@ function WishItem({
   onSetCategories: (ids: number[]) => void;
   onSetOwned: (next: boolean) => void;
   onTogglePublic: (next: boolean) => void;
+  onMoved: () => void;
   onRemove: () => void;
 }) {
   return (
@@ -676,7 +676,10 @@ function WishItem({
           <Switch checked={!!item.public} onChange={onTogglePublic} title="Visible to friends" />
         </div>
       </BookSummary>
-      <RemoveButton onClick={onRemove} />
+      <div className="actions">
+        <StatusPicker status="wish" book={{ book_id: item.book_id }} onChange={onMoved} />
+        <RemoveButton onClick={onRemove} />
+      </div>
     </SortableRow>
   );
 }

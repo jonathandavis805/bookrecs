@@ -375,7 +375,7 @@ export async function handleApi(db: D1Database, req: Request): Promise<Response>
     if (status !== "reading" && status !== "wish" && status !== "read") return json({ error: "Invalid status" }, 400);
     const ref = { bookId: optionalNumber(book_id), olKey: ol_key, year: optionalNumber(year) };
     const r = await core.setStatus(db, user.id, ref, status);
-    return r.ok ? json({ book: r.book, mine: status }) : failure(r);
+    return r.ok ? json({ book: r.book, mine: r.mine }) : failure(r);
   }
 
   const visibility = path.match(/^\/api\/me\/(books|wishlist)\/(\d+)\/public$/);

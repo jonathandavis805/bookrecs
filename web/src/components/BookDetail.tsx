@@ -88,7 +88,15 @@ export default function BookDetail({ bookId }: { bookId: number }) {
   }
 
   const { mine } = book;
-  const status: MineStatus = mine.reading ? "reading" : mine.read ? "read" : mine.wishlist ? "wish" : null;
+  const status: MineStatus = mine.reading
+    ? mine.read
+      ? "rereading"
+      : "reading"
+    : mine.read
+      ? "read"
+      : mine.wishlist
+        ? "wish"
+        : null;
   const reviewDirty = review !== (mine.read?.review ?? "");
   const friends = new Map<string, FriendActivity[]>();
   for (const f of book.friends) friends.set(f.username, [...(friends.get(f.username) ?? []), f]);

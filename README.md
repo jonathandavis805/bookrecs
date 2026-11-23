@@ -267,5 +267,6 @@ answer with the updated club detail (`{club}`).
   nominated book from the vote (members can re-nominate it fresh). Owners
   who want out must transfer ownership to a member or delete the club.
 - A status picker (Reading, Wishlist, Read) shows which of your lists a book is on
-  and moves it: on friends' books, book pages, search results and club results.
+  and moves it: on your own lists, friends' books, book pages, search results and club
+  results. A book you've read can also be read again, which lights up both.
 - Database migrations are in `migrations/`, applied with `wrangler d1 migrations apply`: `bun run migrate:local` for local dev, and `bun run migrate:remote` (run by CI on deploy) for production.

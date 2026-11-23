@@ -484,10 +484,11 @@ export async function backToWishlist(db: D1Database, userId: number, bookId: num
 
 // ---------- What a viewer already has, for marking a friend's books ----------
 
-export type MineStatus = "read" | "wish" | "reading" | null;
+// rereading: on both the read list and currently reading.
+export type MineStatus = "read" | "wish" | "reading" | "rereading" | null;
 
 export async function viewerOwnership(db: D1Database, viewerId: number): Promise<(bookId: number) => MineStatus> {
-  const rows = await queryAll<{ book_id: number; list: Exclude<MineStatus, null> }>(
+  const rows = await queryAll<{ book_id: number; list: "read" | "wish" | "reading" }>(
     db,
     `SELECT book_id, 'reading' AS list FROM reading WHERE user_id = ?1
      UNION ALL SELECT book_id, 'read' FROM reads WHERE user_id = ?1
@@ -496,7 +497,11 @@ export async function viewerOwnership(db: D1Database, viewerId: number): Promise
   );
   // Reading wins over read, which wins over wishlist; rows arrive in that order.
   const status = new Map<number, MineStatus>();
-  for (const r of rows) if (!status.has(r.book_id)) status.set(r.book_id, r.list);
+  for (const r of rows) {
+    const known = status.get(r.book_id);
+    if (!known) status.set(r.book_id, r.list);
+    else if (known === "reading" && r.list === "read") status.set(r.book_id, "rereading");
+  }
   return (bookId) => status.get(bookId) ?? null;
 }
 
@@ -506,8 +511,8 @@ export async function setStatus(
   db: D1Database,
   userId: number,
   ref: BookRef,
-  status: Exclude<MineStatus, null>,
-): Promise<Result<{ book: BookRow }>> {
+  status: "reading" | "wish" | "read",
+): Promise<Result<{ book: BookRow; mine: MineStatus }>> {
   const r = await resolveBook(db, ref);
   if (!r.ok) return r;
   const bookId = r.book.id;
@@ -530,5 +535,5 @@ export async function setStatus(
     const { canAdd, limit } = await getBookAllowance(db, userId);
     moved = canAdd ? await insertRead(db, userId, bookId) : fail(`You have reached the maximum of ${limit} books`);
   }
-  return moved.ok ? r : moved;
+  return moved.ok ? { ...r, mine: status === "reading" && read ? "rereading" : status } : moved;
 }
