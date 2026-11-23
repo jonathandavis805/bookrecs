@@ -35,11 +35,11 @@ export default function BookDetail({ bookId }: { bookId: number }) {
   async function addCoverImage() {
     if (!coverUrl.trim()) return;
     try {
-      const response = await api<{ book: BookDetail }>(`/api/books/${bookId}/cover`, {
+      const response = await api<{ book: Pick<Book, "cover_url"> }>(`/api/books/${bookId}/cover`, {
         method: "POST",
         body: JSON.stringify({ cover_url: coverUrl }),
       });
-      setBook(response.book);
+      setBook((b) => b && { ...b, cover_url: response.book.cover_url });
       setShowAddCover(false);
       setCoverUrl("");
     } catch (e) {
