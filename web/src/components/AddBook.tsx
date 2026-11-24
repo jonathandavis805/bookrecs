@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage, type MineStatus } from "../api";
 import { useBookSearch } from "../useBookSearch";
 import { Byline, Cover } from "./ui/Book";
-import { IconCheck } from "./ui/icons";
 import { type Status, StatusChoice, StatusPicker } from "./ui/StatusPicker";
 import { Switch } from "./ui/Switch";
 
+// Fewer books left than this is worth mentioning.
+const SLOTS_WARNING = 5;
+
 export default function AddBook() {
+  const [manual, setManual] = useState(false);
   const [bookCount, setBookCount] = useState(0);
   const [bookLimit, setBookLimit] = useState<number | null>(25); // Default to 25, null = unlimited
 
@@ -25,19 +28,24 @@ export default function AddBook() {
 
   return (
     <div className="page">
-      <div className="page-head">
-        <h2>Add a Book</h2>
-        <p className="muted">Search the Open Library — or add a book by hand if it's missing.</p>
-        <p className="muted">
-          {bookLimit === null
-            ? "You have unlimited book slots."
-            : atLimit
-              ? `You've reached the maximum of ${bookLimit} books.`
-              : `${remaining} of ${bookLimit} book slots remaining.`}
-        </p>
-      </div>
       <SearchPane atLimit={atLimit} onBookAdded={loadCount} />
-      <ManualPane atLimit={atLimit} bookLimit={bookLimit} onBookAdded={loadCount} />
+      {manual ? (
+        <ManualPane atLimit={atLimit} bookLimit={bookLimit} onBookAdded={loadCount} />
+      ) : (
+        <p className="muted">
+          Can't find it?{" "}
+          <button type="button" className="link" onClick={() => setManual(true)}>
+            Add it by hand
+          </button>
+        </p>
+      )}
+      {remaining !== null && remaining <= SLOTS_WARNING && (
+        <p className="muted">
+          {atLimit
+            ? `You've reached the maximum of ${bookLimit} books read.`
+            : `${remaining} of ${bookLimit} books read left.`}
+        </p>
+      )}
     </div>
   );
 }
@@ -57,7 +65,7 @@ function SearchPane({ atLimit, onBookAdded }: Omit<PaneProps, "bookLimit">) {
   return (
     <section className="add-section">
       <div className="search-bar">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Title or author…" autoFocus />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title or author…" autoFocus />
         {searching && <span className="searching-indicator">Searching…</span>}
       </div>
 
@@ -69,14 +77,7 @@ function SearchPane({ atLimit, onBookAdded }: Omit<PaneProps, "bookLimit">) {
             <li key={h.key} className="book-row">
               <Cover url={h.coverUrl} />
               <div className="info">
-                <div className="title">
-                  {h.title}
-                  {h.added && (
-                    <span className="added-mark" title="Added by someone">
-                      <IconCheck size={14} />
-                    </span>
-                  )}
-                </div>
+                <div className="title">{h.title}</div>
                 <Byline author={h.author} year={h.year} />
               </div>
               <div className="actions">
@@ -95,12 +96,7 @@ function SearchPane({ atLimit, onBookAdded }: Omit<PaneProps, "bookLimit">) {
         </ul>
       )}
 
-      {searched && hits.length === 0 && !error && (
-        <div className="empty">
-          <p>No matches for "{searched}".</p>
-          <p className="muted">Add it by hand using the form below.</p>
-        </div>
-      )}
+      {searched && hits.length === 0 && !error && <div className="empty">No matches for "{searched}".</div>}
     </section>
   );
 }
@@ -153,7 +149,7 @@ function ManualPane({ atLimit, bookLimit, onBookAdded }: PaneProps) {
 
   return (
     <section className="form-section">
-      <h3 className="section-title">Can't find your book? Add it manually</h3>
+      <h3 className="section-title">Add by hand</h3>
 
       <StatusChoice value={target} onChange={setTarget} />
 

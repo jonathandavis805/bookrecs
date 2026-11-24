@@ -13,6 +13,7 @@ import Settings from "./components/Settings";
 import UserMenu from "./components/UserMenu";
 import { IconBell } from "./components/ui/icons";
 import { adoptAccountTheme } from "./theme";
+import { clearCache } from "./useData";
 
 type Route =
   | { name: "books" }
@@ -58,9 +59,26 @@ export default function App() {
 
   useEffect(() => {
     const onHash = () => setRoute(parseRoute());
+    // Remembered on the history entry, so only going back to it restores it.
+    let timer: ReturnType<typeof setTimeout>;
+    const onScroll = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => history.replaceState({ scroll: window.scrollY }, ""), 100);
+    };
+    history.scrollRestoration = "manual";
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    window.addEventListener("scroll", onScroll);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("scroll", onScroll);
+      clearTimeout(timer);
+    };
   }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once the new page has laid out
+  useLayoutEffect(() => {
+    window.scrollTo(0, history.state?.scroll ?? 0);
+  }, [route]);
 
   if (user === undefined) return <div className="centered">Loading…</div>;
   if (user === null) return <Auth onAuthed={setUser} />;
@@ -69,7 +87,10 @@ export default function App() {
     <Main
       user={user}
       route={route}
-      onLogout={() => setUser(null)}
+      onLogout={() => {
+        clearCache();
+        setUser(null);
+      }}
       onNavigate={(name) => {
         window.location.hash = name === "books" ? "#/books" : `#/${name}`;
       }}
@@ -142,10 +163,6 @@ function Main({
     api("/api/logout", { method: "POST" }).finally(onLogout);
   }
 
-  function openProfile(username: string) {
-    window.location.hash = `#/u/${encodeURIComponent(username)}`;
-  }
-
   return (
     <div className="app">
       <header className="topbar" ref={headerRef}>
@@ -181,11 +198,7 @@ function Main({
         {active === "books" && <Profile key={user.username} username={user.username} me={user} />}
         {active === "add" && <AddBook />}
         {active === "friends" && (
-          <Friends
-            refreshKey={friendRequestsVersion}
-            onFriendRequestsChanged={bumpFriendRequests}
-            onOpenProfile={openProfile}
-          />
+          <Friends refreshKey={friendRequestsVersion} onFriendRequestsChanged={bumpFriendRequests} />
         )}
         {route.name === "account" && <Account user={user} onChangePassword={() => setShowSettings(true)} />}
         {active === "clubs" && (

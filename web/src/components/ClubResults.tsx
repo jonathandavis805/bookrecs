@@ -59,10 +59,10 @@ export function ClubResults({
   const runoff = results?.nominations.some((n) => n.eliminated);
 
   return (
-    <section className="club-section">
+    <section>
       <div className="card-head">
         <h3 className="section-title">Results</h3>
-        <div className="actions results-pager">
+        <div className="actions">
           <button
             type="button"
             className="icon-btn"
@@ -100,14 +100,14 @@ export function ClubResults({
             {results.voters} {results.voters === 1 ? "member" : "members"} voted
             {runoff ? " in total. It took a runoff" : ""}.
           </p>
-          <ul className="plain-list">
+          <ul className="book-list">
             {results.nominations.map((n) => {
               const vetoed = n.vetoed_by != null;
               const won = n.book_id === pick.book_id;
               return (
-                <li key={n.id} className={`book-row club-book-row${won ? " my-vote" : ""}${vetoed ? " struck" : ""}`}>
+                <li key={n.id} className={`book-row${vetoed ? " out" : ""}`}>
                   <span className="rank">
-                    {vetoed ? "–" : `#${results.nominations.findIndex((x) => sameResult(x, n)) + 1}`}
+                    {vetoed ? "–" : results.nominations.findIndex((x) => sameResult(x, n)) + 1}
                   </span>
                   <Cover url={n.cover_url} />
                   <div className="info">
@@ -115,7 +115,7 @@ export function ClubResults({
                       <a href={`#/book/${n.book_id}`} className="book-title-link">
                         {n.title}
                       </a>
-                      {won && <span className="badge success">Winner</span>}
+                      {won && <span className="badge">Winner</span>}
                     </div>
                     <Byline author={n.author} year={n.first_publish_year} extra={`nominated by ${n.nominatedBy}`} />
                     <div className="tally">

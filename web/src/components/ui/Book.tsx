@@ -2,7 +2,7 @@ import { IconBook } from "./icons";
 
 export function Cover({ url, size }: { url?: string | null; size?: "sm" }) {
   const className = `cover${size ? ` ${size}` : ""}`;
-  if (url) return <img className={className} src={url} alt="" />;
+  if (url) return <img className={className} src={url} alt="" loading="lazy" decoding="async" />;
   return (
     <span className={`${className} no-cover`}>
       <IconBook size={size === "sm" ? 14 : 18} />

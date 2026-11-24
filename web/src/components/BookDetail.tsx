@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { api, type Book, errorMessage, type MineStatus } from "../api";
+import { useData } from "../useData";
 import { Byline } from "./ui/Book";
-import { IconBook, IconHeart } from "./ui/icons";
 import { readingStatus, readStatus, StatusPicker } from "./ui/StatusPicker";
 
 interface FriendActivity {
@@ -24,12 +24,11 @@ interface BookDetail extends Omit<Book, "mine"> {
 }
 
 export default function BookDetail({ bookId }: { bookId: number }) {
-  const [book, setBook] = useState<BookDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { data, error: loadError, update, reload } = useData<{ book: BookDetail }>(`/api/books/${bookId}`);
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [review, setReview] = useState("");
+  // A review typed but not saved.
+  const [draft, setDraft] = useState<string | null>(null);
   const [showAddCover, setShowAddCover] = useState(false);
   const [coverUrl, setCoverUrl] = useState("");
 
@@ -40,34 +39,21 @@ export default function BookDetail({ bookId }: { bookId: number }) {
         method: "POST",
         body: JSON.stringify({ cover_url: coverUrl }),
       });
-      setBook((b) => b && { ...b, cover_url: response.book.cover_url });
+      update((d) => ({ book: { ...d.book, cover_url: response.book.cover_url } }));
       setShowAddCover(false);
       setCoverUrl("");
     } catch (e) {
-      setError(errorMessage(e));
+      setActionError(errorMessage(e));
     }
   }
 
-  const refresh = useCallback(async () => {
-    const data = await api<{ book: BookDetail }>(`/api/books/${bookId}`);
-    setBook(data.book);
-    setReview(data.book.mine.read?.review ?? "");
-  }, [bookId]);
-
-  useEffect(() => {
-    setLoading(true);
-    setError("");
-    refresh()
-      .catch((e) => setError(errorMessage(e)))
-      .finally(() => setLoading(false));
-  }, [refresh]);
-
-  async function act(path: string, method: string, body: object) {
+  async function saveReview(review: string) {
     setBusy(true);
     setActionError("");
     try {
-      await api(path, { method, body: JSON.stringify(body) });
-      await refresh();
+      await api(`/api/me/books/${bookId}`, { method: "PATCH", body: JSON.stringify({ review }) });
+      await reload();
+      setDraft(null);
     } catch (e) {
       setActionError(errorMessage(e));
     } finally {
@@ -75,18 +61,11 @@ export default function BookDetail({ bookId }: { bookId: number }) {
     }
   }
 
-  if (loading) {
-    return <div className="loading">Loading…</div>;
+  if (!data) {
+    return loadError ? <div className="error">{loadError}</div> : <div className="loading">Loading…</div>;
   }
 
-  if (error || !book) {
-    return (
-      <div className="page">
-        <div className="error">{error || "Book not found"}</div>
-      </div>
-    );
-  }
-
+  const { book } = data;
   const { mine } = book;
   const status: MineStatus = mine.reading
     ? readingStatus(mine.reading.listening, !!mine.read)
@@ -95,127 +74,90 @@ export default function BookDetail({ bookId }: { bookId: number }) {
       : mine.wishlist
         ? "wish"
         : null;
-  const reviewDirty = review !== (mine.read?.review ?? "");
+  const saved = mine.read?.review ?? "";
+  const review = draft ?? saved;
   const friends = new Map<string, FriendActivity[]>();
   for (const f of book.friends) friends.set(f.username, [...(friends.get(f.username) ?? []), f]);
 
   return (
     <div className="page">
-      <div className="page-head">
-        <h2>{book.title}</h2>
+      <div className="book-head">
+        {book.cover_url ? (
+          <img src={book.cover_url} alt={book.title} className="cover-lg" />
+        ) : (
+          <div className="cover-lg no-cover">
+            {showAddCover ? (
+              <div className="add-cover-form">
+                <input
+                  type="url"
+                  placeholder="Image URL"
+                  value={coverUrl}
+                  onChange={(e) => setCoverUrl(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addCoverImage()}
+                />
+                <div className="add-cover-buttons">
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    onClick={() => {
+                      setShowAddCover(false);
+                      setCoverUrl("");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button type="button" onClick={addCoverImage} className="btn-primary btn-sm">
+                    Add
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setShowAddCover(true)} className="add-cover-btn">
+                + Add Cover
+              </button>
+            )}
+          </div>
+        )}
+        <div className="info">
+          <h2>{book.title}</h2>
+          <Byline
+            author={book.author}
+            year={book.first_publish_year}
+            extra={book.manual ? "added by hand" : undefined}
+          />
+          <div className="my-lists">
+            <StatusPicker status={status} book={{ book_id: book.id }} onChange={() => reload()} />
+            {mine.read && <span className="muted">Ranked #{mine.read.rank}</span>}
+            {mine.wishlist && (
+              <span className="muted">
+                #{mine.wishlist.rank} on your wishlist{mine.wishlist.owned ? " · Owned" : ""}
+              </span>
+            )}
+          </div>
+          {actionError && <div className="error-text">{actionError}</div>}
+        </div>
       </div>
 
-      <section className="card">
-        <div className="card-head">
-          <h3>Book Details</h3>
-        </div>
-        <div className="book-row book-detail-row">
-          {book.cover_url ? (
-            <img src={book.cover_url} alt={book.title} className="cover-lg" />
-          ) : (
-            <div className="cover-lg no-cover">
-              {showAddCover ? (
-                <div className="add-cover-form">
-                  <input
-                    type="url"
-                    placeholder="Image URL"
-                    value={coverUrl}
-                    onChange={(e) => setCoverUrl(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addCoverImage()}
-                  />
-                  <div className="add-cover-buttons">
-                    <button
-                      type="button"
-                      className="btn-secondary btn-sm"
-                      onClick={() => {
-                        setShowAddCover(false);
-                        setCoverUrl("");
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button type="button" onClick={addCoverImage} className="btn-primary btn-sm">
-                      Add
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button type="button" onClick={() => setShowAddCover(true)} className="add-cover-btn">
-                  + Add Cover
-                </button>
-              )}
-            </div>
-          )}
-          <div className="info">
-            <div className="title title-lg">
-              {book.title}
-              {book.manual ? <span className="badge">manual</span> : null}
-            </div>
-            <Byline author={book.author} year={book.first_publish_year} />
-            <div className="my-lists">
-              <StatusPicker
-                status={status}
-                book={{ book_id: book.id }}
-                onChange={() => refresh().catch((e) => setActionError(errorMessage(e)))}
-              />
-              {mine.read && (
-                <span className="badge accent">
-                  Read #{mine.read.rank}
-                  {mine.read.listened ? " · Listened" : ""}
-                </span>
-              )}
-              {mine.wishlist?.owned ? <WishlistBadge owned /> : null}
-            </div>
-            {actionError && <div className="error-text">{actionError}</div>}
-          </div>
-        </div>
-      </section>
-
-      {book.synopsis && (
-        <section className="card">
-          <div className="card-head">
-            <h3>Synopsis</h3>
-          </div>
-          <p className="synopsis-text">{book.synopsis}</p>
-        </section>
-      )}
-
       {mine.read && (
-        <section className="card">
-          <div className="card-head">
-            <h3>My Review</h3>
-          </div>
+        <section>
+          <h3 className="section-title">Your review</h3>
           <textarea
             className="review"
             value={review}
             placeholder="Write a review…"
-            onChange={(e) => setReview(e.target.value)}
+            onChange={(e) => setDraft(e.target.value)}
           />
-          {reviewDirty && (
-            <button
-              type="button"
-              className="save-review"
-              disabled={busy}
-              onClick={() => act(`/api/me/books/${book.id}`, "PATCH", { review })}
-            >
+          {review !== saved && (
+            <button type="button" className="btn-primary btn-sm" disabled={busy} onClick={() => saveReview(review)}>
               {busy ? "Saving…" : "Save review"}
             </button>
           )}
         </section>
       )}
 
-      <section className="card">
-        <div className="card-head">
-          <h3>Friends</h3>
-          {friends.size > 0 && (
-            <p className="muted">
-              {friends.size} friend{friends.size !== 1 ? "s" : ""}
-            </p>
-          )}
-        </div>
-        {friends.size === 0 ? (
-          <div className="empty">None of your friends have this book yet.</div>
-        ) : (
+      {friends.size > 0 && (
+        <section>
+          <h3 className="section-title">Friends</h3>
           <ul className="book-list">
             {[...friends].map(([username, entries]) => (
               <li key={username} className="book-row">
@@ -224,9 +166,7 @@ export default function BookDetail({ bookId }: { bookId: number }) {
                     <a className="user-link" href={`#/u/${encodeURIComponent(username)}`}>
                       {username}
                     </a>
-                    {entries.map((f) => (
-                      <FriendBadge key={f.status} entry={f} />
-                    ))}
+                    <span className="muted">{entries.map(describe).join(" · ")}</span>
                   </div>
                   {entries.map(
                     (f) =>
@@ -240,29 +180,22 @@ export default function BookDetail({ bookId }: { bookId: number }) {
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
+      )}
+
+      {book.synopsis && (
+        <section>
+          <h3 className="section-title">Synopsis</h3>
+          {/* Open Library's synopses carry Markdown emphasis. */}
+          <p className="synopsis-text">{book.synopsis.replace(/\*+/g, "")}</p>
+        </section>
+      )}
     </div>
   );
 }
 
-function WishlistBadge({ owned }: { owned: boolean }) {
-  return owned ? (
-    <span className="badge success">Owned</span>
-  ) : (
-    <span className="badge">
-      <IconHeart size={12} /> Wishlist
-    </span>
-  );
-}
-
-function FriendBadge({ entry }: { entry: FriendActivity }) {
-  if (entry.status === "read") return <span className="badge">Read #{entry.rank}</span>;
-  if (entry.status === "reading")
-    return (
-      <span className="badge accent">
-        <IconBook size={12} /> Reading
-      </span>
-    );
-  return <WishlistBadge owned={!!entry.owned} />;
+function describe(entry: FriendActivity): string {
+  if (entry.status === "read") return `Read, #${entry.rank}`;
+  if (entry.status === "reading") return "Reading";
+  return entry.owned ? "Owns it" : "On their wishlist";
 }
