@@ -8,8 +8,8 @@ export type Status = "reading" | "wish" | "read";
 type Pick = Status | "listening" | "listened";
 
 const OPTIONS = [
-  { value: "reading", label: "Reading", Icon: IconBook },
   { value: "wish", label: "Wishlist", Icon: IconHeart },
+  { value: "reading", label: "Reading", Icon: IconBook },
   { value: "read", label: "Read", Icon: IconCheck },
 ] as const;
 

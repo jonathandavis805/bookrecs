@@ -1,4 +1,3 @@
-import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { IconChevronDown, IconLogOut, IconUser } from "./ui/icons";
 
@@ -41,42 +40,33 @@ export default function UserMenu({ username, onAccount, onLogout }: UserMenuProp
         <span className="user-menu-name">{username}</span>
         <IconChevronDown size={14} className={`user-menu-chevron${open ? " open" : ""}`} />
       </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            className="user-menu-card"
-            role="menu"
-            initial={{ opacity: 0, y: -6, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.95 }}
-            transition={{ duration: 0.14, ease: "easeOut" }}
+      {open && (
+        <div className="user-menu-card" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onAccount();
+            }}
           >
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                onAccount();
-              }}
-            >
-              <IconUser />
-              My Account
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="danger"
-              onClick={() => {
-                setOpen(false);
-                onLogout();
-              }}
-            >
-              <IconLogOut />
-              Log out
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <IconUser />
+            My Account
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="danger"
+            onClick={() => {
+              setOpen(false);
+              onLogout();
+            }}
+          >
+            <IconLogOut />
+            Log out
+          </button>
+        </div>
+      )}
     </div>
   );
 }

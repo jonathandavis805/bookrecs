@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
@@ -14,8 +13,10 @@ import { useBookSearch } from "../useBookSearch";
 import { ClubBallot, MAX_RANKED } from "./ClubBallot";
 import { ClubResults } from "./ClubResults";
 import { Byline, Cover } from "./ui/Book";
-import { IconChevronLeft, IconClock, IconThumbsDown, IconThumbsUp, IconX } from "./ui/icons";
+import { IconChevronLeft, IconClock } from "./ui/icons";
 import { ConfirmDialog, Modal } from "./ui/Modal";
+import { MoreButton } from "./ui/MoreButton";
+import { RemoveButton } from "./ui/RemoveButton";
 import { StatusPicker, statusLabel } from "./ui/StatusPicker";
 
 function goBackToClubs() {
@@ -356,104 +357,90 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
 
       {data.currentPick && <CurrentPick pick={data.currentPick} onMoved={load} />}
 
-      <section className="club-section">
-        <h3 className="section-title">
-          {nominating ? "Nominate the next book" : voting ? "Vote for the next book" : "Voting"}
-        </h3>
-        {!voting && !nominating && (
-          <div className="club-closed-row">
-            <span className="muted">Voting is closed. The winner is the current read; the full results are below.</span>
-            {isOwner && (
-              <button type="button" className="btn-primary" onClick={openNominations}>
-                Start nominations
-              </button>
-            )}
-          </div>
+      <section>
+        <div className="card-head">
+          <h3 className="section-title">
+            {nominating ? "Nominate the next book" : voting ? "Vote for the next book" : "Next book"}
+          </h3>
+          {isOwner && nominating && (
+            <button
+              type="button"
+              className="btn-primary btn-sm"
+              onClick={startVoting}
+              disabled={activeNominations.length === 0}
+              title={
+                activeNominations.length === 0
+                  ? "Nominate at least one book first"
+                  : "Lock nominations and open the vote"
+              }
+            >
+              Start voting
+            </button>
+          )}
+          {isOwner && voting && (
+            <button
+              type="button"
+              className="btn-primary btn-sm"
+              onClick={closeVote}
+              disabled={inPlay.length === 0 || data.votedCount === 0}
+              title={
+                activeNominations.length === 0
+                  ? data.nominations.length > 0
+                    ? "Every nomination was vetoed"
+                    : "Nominate at least one book first"
+                  : data.votedCount === 0
+                    ? "Waiting for votes"
+                    : "Most points wins"
+              }
+            >
+              {runoff ? "Close runoff" : "Close voting"}
+            </button>
+          )}
+          {isOwner && !voting && !nominating && (
+            <button type="button" className="btn-primary btn-sm" onClick={openNominations}>
+              Start nominations
+            </button>
+          )}
+        </div>
+        {!voting && !nominating && !isOwner && (
+          <p className="muted">The owner hasn't opened nominations for the next book yet.</p>
         )}
 
         {nominating && (
           <>
-            {isOwner && (
-              <div className="club-owner-actions">
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={startVoting}
-                  disabled={activeNominations.length === 0}
-                  title={
-                    activeNominations.length === 0
-                      ? "Nominate at least one book first"
-                      : "Lock nominations and open the vote"
-                  }
-                >
-                  Start voting
-                </button>
-              </div>
-            )}
-
             {myNominations < MAX_NOMINATIONS ? (
               <NominatePane clubId={clubId} onNominated={load} />
             ) : (
-              <div className="empty club-nominate">
+              <p className="muted club-nominate">
                 You've used all {MAX_NOMINATIONS} of your nominations. Withdraw one to swap it.
-              </div>
+              </p>
             )}
 
             {data.nominations.length === 0 ? (
               <div className="empty">No nominations yet — suggest the first book.</div>
             ) : (
-              <motion.ul className="plain-list" layout>
+              <ul className="book-list">
                 {sortedNominations.map((n) => (
                   <NominationRow
                     key={n.id}
                     n={n}
-                    voting={false}
-                    canRemove={isOwner || (n.user_id === user.id && n.vetoed_by == null)}
-                    onRemove={() => setRemoveTarget(n)}
+                    onRemove={
+                      isOwner || (n.user_id === user.id && n.vetoed_by == null) ? () => setRemoveTarget(n) : undefined
+                    }
                   />
                 ))}
-              </motion.ul>
+              </ul>
             )}
 
-            <div className="muted club-myvote-note">
-              {Math.min(myNominations, MAX_NOMINATIONS)} of your {MAX_NOMINATIONS} nominations used. The owner starts
-              the vote once the field is set.
-            </div>
+            <p className="muted club-note">
+              {Math.min(myNominations, MAX_NOMINATIONS)} of your {MAX_NOMINATIONS} nominations used.
+              {!isOwner && " The owner starts the vote once the field is set."}
+            </p>
           </>
         )}
 
         {voting && (
           <>
-            {isOwner && (
-              <div className="club-owner-actions">
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={closeVote}
-                  disabled={inPlay.length === 0 || data.votedCount === 0}
-                  title={
-                    activeNominations.length === 0
-                      ? data.nominations.length > 0
-                        ? "Every nomination was vetoed"
-                        : "Nominate at least one book first"
-                      : data.votedCount === 0
-                        ? "Waiting for votes"
-                        : "Most points wins"
-                  }
-                >
-                  {runoff ? "Close runoff & pick winner" : "Close voting & pick winner"}
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => setShowResetVote(true)}
-                  title="Clear all votes and reopen nominations"
-                >
-                  Back to nominations
-                </button>
-              </div>
-            )}
-
             {runoff && (
               <div className="club-runoff-banner">
                 <IconClock size={18} />
@@ -464,46 +451,38 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
               </div>
             )}
 
-            <p className="muted results-note">
-              Rank up to three books, best first. Points stay hidden until voting closes. {data.votedCount} of{" "}
-              {memberCount} {memberCount === 1 ? "member has" : "members have"} voted.
+            <p className="muted club-note">
+              {ballot.length === 0 ? "Rank up to three books, best first. " : ""}
+              {data.votedCount} of {memberCount} {memberCount === 1 ? "member has" : "members have"} voted.
             </p>
-            <ClubBallot
-              ballot={ballot}
-              nominations={data.nominations}
-              onReorder={setDraft}
-              onDrop={() => draft && saveBallot(draft)}
-              onRemove={(id) => saveBallot(ballot.filter((x) => x !== id))}
-            />
+            {ballot.length > 0 && <ClubBallot ballot={ballot} nominations={data.nominations} onChange={saveBallot} />}
 
             {data.nominations.length === 0 ? (
-              <div className="empty">No nominations yet — suggest the first book.</div>
+              <div className="empty">No nominations yet.</div>
             ) : (
-              <motion.ul className="plain-list" layout>
-                {sortedNominations.map((n) => (
-                  <NominationRow
-                    key={n.id}
-                    n={n}
-                    voting
-                    place={ballot.indexOf(n.id)}
-                    ballotFull={ballot.length >= MAX_RANKED}
-                    canVeto={!data.myVetoUsed}
-                    canRemove={isOwner && !n.eliminated}
-                    onVote={() =>
-                      saveBallot(ballot.includes(n.id) ? ballot.filter((x) => x !== n.id) : [...ballot, n.id])
-                    }
-                    onVeto={() => setVetoTarget(n)}
-                    onRemove={() => setRemoveTarget(n)}
-                  />
-                ))}
-              </motion.ul>
+              <ul className="book-list">
+                {sortedNominations
+                  .filter((n) => !ballot.includes(n.id))
+                  .map((n) => (
+                    <NominationRow
+                      key={n.id}
+                      n={n}
+                      place={ballot.length}
+                      onVote={() => saveBallot([...ballot, n.id])}
+                      onVeto={data.myVetoUsed ? undefined : () => setVetoTarget(n)}
+                      onRemove={isOwner && !n.eliminated ? () => setRemoveTarget(n) : undefined}
+                    />
+                  ))}
+              </ul>
             )}
 
-            <div className="muted club-myvote-note">
-              {data.myVetoUsed
-                ? "You've used your veto for this vote."
-                : "You also get one veto — it strikes a book for everyone and can't be undone."}
-            </div>
+            {isOwner && (
+              <p className="muted club-note">
+                <button type="button" className="link" onClick={() => setShowResetVote(true)}>
+                  Back to nominations
+                </button>
+              </p>
+            )}
           </>
         )}
       </section>
@@ -512,8 +491,8 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         <ClubResults clubId={clubId} current={data.currentPick} past={data.pastPicks} onMoved={load} />
       )}
 
-      <section className="club-section">
-        <h3 className="section-title">Members ({memberCount})</h3>
+      <section>
+        <h3 className="section-title">Members</h3>
         <MembersPane
           data={data}
           userId={user.id}
@@ -524,22 +503,22 @@ export default function ClubDetail({ user, clubId }: { user: User; clubId: numbe
         />
         <div className="club-footer-actions">
           <button type="button" className="link danger" onClick={requestLeave}>
-            Leave this club
+            Leave club
           </button>
           {isOwner && (
             <button type="button" className="link danger" onClick={requestDelete}>
-              Delete this club
+              Delete club
             </button>
           )}
         </div>
       </section>
 
       {data.pastPicks.length > 0 && (
-        <section className="club-section">
+        <section>
           <h3 className="section-title">Past picks</h3>
-          <ul className="plain-list">
+          <ul className="book-list">
             {data.pastPicks.map((p) => (
-              <li key={p.id} className="book-row club-book-row">
+              <li key={p.id} className="book-row">
                 <Cover url={p.cover_url} size="sm" />
                 <div className="info">
                   <div className="title">
@@ -766,84 +745,61 @@ function NominatePane({ clubId, onNominated }: { clubId: number; onNominated: ()
 
 function NominationRow({
   n,
-  voting,
-  place = -1,
-  ballotFull = false,
-  canVeto = false,
-  canRemove,
+  place = 0,
   onVote,
   onVeto,
   onRemove,
 }: {
   n: ClubNomination;
-  voting: boolean;
+  // Where on the ballot voting for it would put it.
   place?: number;
-  ballotFull?: boolean;
-  canVeto?: boolean;
-  canRemove: boolean;
   onVote?: () => void;
   onVeto?: () => void;
-  onRemove: () => void;
+  onRemove?: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const vetoed = n.vetoed_by != null;
-  const ranked = place !== -1;
-  const voteLabel = ranked ? "Remove from your ballot" : ballotFull ? "Your ballot is full" : "Add to your ballot";
+  const out = vetoed || !!n.eliminated;
+  const veto = out ? undefined : onVeto;
   return (
-    <motion.li
-      layout
-      transition={{ type: "spring", stiffness: 500, damping: 40 }}
-      className={`book-row club-book-row${ranked ? " my-vote" : ""}${vetoed || n.eliminated ? " vetoed" : ""}`}
-    >
+    <li className={`book-row${out ? " out" : ""}`}>
       <Cover url={n.cover_url} />
       <div className="info">
         <div className="title">
           {n.title}
-          {ranked && <span className="badge accent">Your {PLACES[place]}</span>}
-          {vetoed && <span className="badge danger">Vetoed by {n.vetoedBy ?? "a member"}</span>}
+          {vetoed && <span className="badge">Vetoed by {n.vetoedBy ?? "a member"}</span>}
           {!vetoed && !!n.eliminated && <span className="badge">Not in the runoff</span>}
         </div>
         <Byline author={n.author} year={n.first_publish_year} extra={`nominated by ${n.nominatedBy}`} />
       </div>
-      <div className="actions">
-        {!vetoed && !n.eliminated && voting && (
-          <>
-            <button
-              type="button"
-              className={`btn-secondary vote-btn${ranked ? " on" : ""}`}
-              onClick={onVote}
-              disabled={ballotFull && !ranked}
-              title={voteLabel}
-              aria-label={`${voteLabel}: ${n.title}`}
-              aria-pressed={ranked}
-            >
-              <IconThumbsUp />
-            </button>
-            {canVeto && (
-              <button
-                type="button"
-                className="danger"
-                onClick={onVeto}
-                title="Veto: strike this book (one veto per vote)"
-                aria-label={`Veto ${n.title}`}
-              >
-                <IconThumbsDown />
+      {onVote && !out && place < MAX_RANKED && (
+        <button
+          type="button"
+          className="btn-secondary btn-sm"
+          aria-label={`Rank ${n.title} ${PLACES[place]}`}
+          onClick={onVote}
+        >
+          Rank {PLACES[place]}
+        </button>
+      )}
+      {(veto || onRemove) && <MoreButton title={n.title} open={open} onToggle={() => setOpen(!open)} />}
+      {open && (
+        <div className="row-panel">
+          <div className="row-panel-line">
+            {veto && (
+              <button type="button" className="link danger" onClick={veto}>
+                Veto
               </button>
             )}
-          </>
-        )}
-        {canRemove && (
-          <button
-            type="button"
-            className="icon-btn remove"
-            onClick={onRemove}
-            title="Remove from the vote"
-            aria-label="Remove nomination"
-          >
-            <IconX size={14} />
-          </button>
-        )}
-      </div>
-    </motion.li>
+            {onRemove && (
+              <button type="button" className="link danger" onClick={onRemove}>
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -855,22 +811,24 @@ function CurrentPick({
   onMoved: () => Promise<void>;
 }) {
   return (
-    <section className="card">
+    <section>
       <h3 className="section-title">Current read</h3>
-      <div className="book-row">
-        <Cover url={pick.cover_url} />
-        <div className="info">
-          <div className="title">
-            <a href={`#/book/${pick.book_id}`} className="book-title-link">
-              {pick.title}
-            </a>
+      <ul className="book-list">
+        <li className="book-row">
+          <Cover url={pick.cover_url} />
+          <div className="info">
+            <div className="title">
+              <a href={`#/book/${pick.book_id}`} className="book-title-link">
+                {pick.title}
+              </a>
+            </div>
+            <Byline author={pick.author} year={pick.first_publish_year} />
           </div>
-          <Byline author={pick.author} year={pick.first_publish_year} />
-        </div>
-        <div className="actions">
-          <StatusPicker status={pick.mine} book={{ book_id: pick.book_id }} onChange={() => onMoved()} />
-        </div>
-      </div>
+          <div className="actions">
+            <StatusPicker status={pick.mine} book={{ book_id: pick.book_id }} onChange={() => onMoved()} />
+          </div>
+        </li>
+      </ul>
     </section>
   );
 }
@@ -891,7 +849,6 @@ function MembersPane({
   onError: (msg: string) => void;
 }) {
   const [friends, setFriends] = useState<{ user_id: number; username: string }[]>([]);
-  const [inviteQ, setInviteQ] = useState("");
   const [addQ, setAddQ] = useState("");
   const [addBusy, setAddBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -908,8 +865,7 @@ function MembersPane({
   const accepted = data.members.filter((m) => m.status === "accepted");
   const pending = data.members.filter((m) => m.status === "pending");
   const inviteCandidates = friends.filter(
-    (f) =>
-      !memberIds.has(f.user_id) && (!inviteQ.trim() || f.username.toLowerCase().includes(inviteQ.trim().toLowerCase())),
+    (f) => !memberIds.has(f.user_id) && f.username.toLowerCase().includes(addQ.trim().toLowerCase()),
   );
 
   async function invite(username: string) {
@@ -919,7 +875,7 @@ function MembersPane({
         method: "POST",
         body: JSON.stringify({ username }),
       });
-      setInviteQ("");
+      setAddQ("");
       onInvited();
     } catch (e) {
       onError(errorMessage(e));
@@ -968,25 +924,20 @@ function MembersPane({
 
   function memberRow(m: ClubMember) {
     return (
-      <li key={m.user_id} className="club-member">
+      <li key={m.user_id} className="row">
         <a href={`#/u/${encodeURIComponent(m.username)}`} className="club-member-name">
           {m.username}
         </a>
         <span className="muted club-member-tags">
-          {m.role === "owner" ? "owner" : "member"}
-          {m.status === "pending" && " · invited"}
-          {m.user_id === userId && " · you"}
+          {[m.role === "owner" && "owner", m.status === "pending" && "invited", m.user_id === userId && "you"]
+            .filter(Boolean)
+            .join(" · ")}
         </span>
         {isOwner && m.role !== "owner" && (
-          <button
-            type="button"
-            className="icon-btn remove"
+          <RemoveButton
             title={m.status === "pending" ? "Cancel invite" : "Remove from club"}
-            aria-label={m.status === "pending" ? "Cancel invite" : "Remove from club"}
             onClick={() => onRemove(m.user_id)}
-          >
-            <IconX size={14} />
-          </button>
+          />
         )}
       </li>
     );
@@ -994,33 +945,25 @@ function MembersPane({
 
   return (
     <div>
-      <ul className="club-member-list">{accepted.map(memberRow)}</ul>
-      {pending.length > 0 && (
-        <>
-          <div className="field-label club-invited-label">Invited ({pending.length})</div>
-          <ul className="club-member-list">{pending.map(memberRow)}</ul>
-        </>
-      )}
+      <ul className="plain-list">{[...accepted, ...pending].map(memberRow)}</ul>
       <div className="club-invite-box">
-        <span className="field-label">Invite a friend</span>
-        {inviteCandidates.length > 0 && (
-          <>
-            <input value={inviteQ} onChange={(e) => setInviteQ(e.target.value)} placeholder="Filter your friends…" />
-            <div className="chip-picker">
-              {inviteCandidates.map((f) => (
-                <button key={f.user_id} type="button" className="chip" onClick={() => invite(f.username)}>
-                  {f.username}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
         <form className="search-bar" onSubmit={addByUsername}>
-          <input value={addQ} onChange={(e) => setAddQ(e.target.value)} placeholder="Add by username or email…" />
-          <button type="submit" className="btn-secondary" disabled={addBusy}>
-            {addBusy ? "…" : "Add"}
-          </button>
+          <input value={addQ} onChange={(e) => setAddQ(e.target.value)} placeholder="Invite by username or email…" />
+          {addQ.trim() && (
+            <button type="submit" className="btn-secondary" disabled={addBusy}>
+              Invite
+            </button>
+          )}
         </form>
+        {inviteCandidates.length > 0 && (
+          <div className="chip-picker">
+            {inviteCandidates.map((f) => (
+              <button key={f.user_id} type="button" className="chip" onClick={() => invite(f.username)}>
+                + {f.username}
+              </button>
+            ))}
+          </div>
+        )}
         {note && <div className="muted">{note}</div>}
       </div>
     </div>

@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, errorMessage, type ReadingItem } from "../api";
+import { useData } from "../useData";
 import { Cover } from "./ui/Book";
+import { ConfirmDialog } from "./ui/Modal";
+import { RemoveButton } from "./ui/RemoveButton";
 
 interface Friend {
   user_id: number;
@@ -20,37 +23,30 @@ interface SearchableUser {
 interface FriendsProps {
   refreshKey: number;
   onFriendRequestsChanged: () => void;
-  onOpenProfile: (username: string) => void;
 }
 
-export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenProfile }: FriendsProps) {
-  const [friends, setFriends] = useState<Friend[]>([]);
-  const [incoming, setIncoming] = useState<Request[]>([]);
-  const [outgoing, setOutgoing] = useState<Request[]>([]);
+export default function Friends({ refreshKey, onFriendRequestsChanged }: FriendsProps) {
+  const { data, error: loadError, reload: reloadFriends } = useData<{ friends: Friend[] }>("/api/friends");
+  const { data: requests, reload: reloadRequests } = useData<{ incoming: Request[]; outgoing: Request[] }>(
+    "/api/friends/requests",
+  );
+  const friends = data?.friends ?? [];
+  const incoming = requests?.incoming ?? [];
+  const outgoing = requests?.outgoing ?? [];
+  const [removing, setRemoving] = useState<Friend | null>(null);
   const [addInput, setAddInput] = useState("");
   const [searchResults, setSearchResults] = useState<SearchableUser[]>([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
-  const load = useCallback(async () => {
-    try {
-      const [f, r] = await Promise.all([
-        api<{ friends: Friend[] }>("/api/friends"),
-        api<{ incoming: Request[]; outgoing: Request[] }>("/api/friends/requests"),
-      ]);
-      setFriends(f.friends);
-      setIncoming(r.incoming);
-      setOutgoing(r.outgoing);
-    } catch (e) {
-      setError(errorMessage(e));
-    }
-  }, []);
+  const load = () => Promise.all([reloadFriends(), reloadRequests()]);
 
+  // Requests answered from the notifications panel.
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a refetch trigger
   useEffect(() => {
-    load();
-  }, [load, refreshKey]);
+    if (refreshKey > 0) load();
+  }, [refreshKey]);
 
   useEffect(() => {
     const q = addInput.trim();
@@ -73,34 +69,16 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
     };
   }, [addInput]);
 
-  async function addFriend(e: React.FormEvent) {
-    e.preventDefault();
-    if (!addInput.trim()) return;
+  async function addFriend(usernameOrEmail: string) {
     setError("");
     setInfo("");
     try {
       const r = await api<{ username?: string; autoAccepted?: boolean }>("/api/friends/requests", {
         method: "POST",
-        body: JSON.stringify({ usernameOrEmail: addInput.trim() }),
+        body: JSON.stringify({ usernameOrEmail }),
       });
       setInfo(r.autoAccepted ? `You are now friends with ${r.username}!` : `Request sent to ${r.username}.`);
       setAddInput("");
-      await load();
-      onFriendRequestsChanged();
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
-
-  async function addFriendByUsername(username: string) {
-    setError("");
-    setInfo("");
-    try {
-      const r = await api<{ username?: string; autoAccepted?: boolean }>("/api/friends/requests", {
-        method: "POST",
-        body: JSON.stringify({ usernameOrEmail: username }),
-      });
-      setInfo(r.autoAccepted ? `You are now friends with ${r.username}!` : `Request sent to ${r.username}.`);
       await load();
       onFriendRequestsChanged();
     } catch (err) {
@@ -132,26 +110,27 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
 
   return (
     <div className="page">
-      <div className="page-head">
-        <h2>Friends</h2>
-      </div>
-
-      {error && <div className="error">{error}</div>}
+      {(error || loadError) && <div className="error">{error || loadError}</div>}
       {info && <div className="success">{info}</div>}
 
       <section>
-        <p className="muted">Search by name, email, or username to find people and add them as friends.</p>
-
-        <form className="search-bar" onSubmit={addFriend}>
+        <form
+          className="search-bar"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (addInput.trim()) addFriend(addInput.trim());
+          }}
+        >
           <input
             value={addInput}
             onChange={(e) => setAddInput(e.target.value)}
-            placeholder="Search by name, email, or username…"
-            autoFocus
+            placeholder="Find people by name, email, or username…"
           />
-          <button type="submit" className="btn-primary">
-            Add friend
-          </button>
+          {addInput.trim() && (
+            <button type="submit" className="btn-primary">
+              Add friend
+            </button>
+          )}
         </form>
 
         {searching && <div className="muted">Searching…</div>}
@@ -172,7 +151,7 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
                     ) : isPending ? (
                       <span className="muted">Request sent</span>
                     ) : (
-                      <button type="button" onClick={() => addFriendByUsername(u.username)}>
+                      <button type="button" className="btn-secondary btn-sm" onClick={() => addFriend(u.username)}>
                         Add friend
                       </button>
                     )}
@@ -221,8 +200,10 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
         )}
 
         <section>
-          <h3 className="section-title">Your friends</h3>
-          {friends.length === 0 ? (
+          <h3 className="section-title">Friends</h3>
+          {data === null ? (
+            <div className="loading">Loading…</div>
+          ) : friends.length === 0 ? (
             <div className="empty">
               <p className="muted">No friends yet — add someone above.</p>
             </div>
@@ -234,18 +215,10 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
                     <a className="user-link" href={`#/u/${encodeURIComponent(f.username)}`}>
                       {f.username}
                     </a>
-                    <div className="actions">
-                      <button type="button" onClick={() => onOpenProfile(f.username)}>
-                        View profile
-                      </button>
-                      <button type="button" className="danger" onClick={() => unfriend(f.user_id)}>
-                        Remove
-                      </button>
-                    </div>
+                    <RemoveButton title={`Remove ${f.username}`} onClick={() => setRemoving(f)} />
                   </div>
                   {f.reading.length > 0 && (
                     <div className="friend-reading">
-                      <span className="friend-reading-label">Reading</span>
                       {f.reading.map((b) => (
                         <a
                           key={b.book_id}
@@ -265,6 +238,21 @@ export default function Friends({ refreshKey, onFriendRequestsChanged, onOpenPro
           )}
         </section>
       </section>
+
+      {removing && (
+        <ConfirmDialog
+          title={`Remove ${removing.username}?`}
+          confirmLabel="Remove friend"
+          danger
+          onConfirm={() => {
+            unfriend(removing.user_id);
+            setRemoving(null);
+          }}
+          onCancel={() => setRemoving(null)}
+        >
+          You'll stop seeing each other's books.
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

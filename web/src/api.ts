@@ -190,7 +190,12 @@ export class ApiError extends Error {
   }
 }
 
+let writes = 0;
+// How many changes have been sent, for telling whether a read overlapped one.
+export const writeCount = () => writes;
+
 export async function api<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
+  if (options.method) writes++;
   const res = await fetch(path, {
     credentials: "include",
     headers: { "content-type": "application/json", ...(options.headers || {}) },

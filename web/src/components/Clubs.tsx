@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type ClubInvite, type ClubStage, type ClubSummary, errorMessage } from "../api";
-import { IconChevronRight } from "./ui/icons";
+import { useData } from "../useData";
 
 const STAGE_LABEL: Record<ClubStage, string> = {
   nominating: "Nominating",
@@ -9,39 +9,31 @@ const STAGE_LABEL: Record<ClubStage, string> = {
   closed: "",
 };
 
+interface ClubLists {
+  clubs: ClubSummary[];
+  invites: ClubInvite[];
+}
+
 export default function Clubs({ refreshKey, onClubsChanged }: { refreshKey: number; onClubsChanged: () => void }) {
-  const [clubs, setClubs] = useState<ClubSummary[]>([]);
-  const [invites, setInvites] = useState<ClubInvite[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, error: loadError, update, reload } = useData<ClubLists>("/api/clubs");
+  const clubs = data?.clubs ?? [];
+  const invites = data?.invites ?? [];
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const d = await api<{ clubs: ClubSummary[]; invites: ClubInvite[] }>("/api/clubs");
-      setClubs(d.clubs);
-      setInvites(d.invites);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a refetch trigger
+  // Invites answered from the notifications panel.
   useEffect(() => {
-    load();
-  }, [load, refreshKey]);
+    if (refreshKey > 0) reload();
+  }, [reload, refreshKey]);
 
   async function respond(clubId: number, accept: boolean) {
     setError("");
     try {
-      const d = await api<{ clubs: ClubSummary[]; invites: ClubInvite[] }>(`/api/clubs/${clubId}/respond`, {
+      const d = await api<ClubLists>(`/api/clubs/${clubId}/respond`, {
         method: "POST",
         body: JSON.stringify({ accept }),
       });
-      setClubs(d.clubs);
-      setInvites(d.invites);
+      update(() => d);
       // The backend marked the invite notification as read — refresh the
       // bell count (and any other panels) right away instead of waiting
       // for the 30s poll.
@@ -57,17 +49,16 @@ export default function Clubs({ refreshKey, onClubsChanged }: { refreshKey: numb
 
   return (
     <div className="page">
-      <div className="page-head">
-        <h2>Clubs</h2>
-        <p className="muted">Read together: nominate books, vote, and pick your next read.</p>
+      <div className="card-head">
+        <h3 className="section-title">Clubs</h3>
         {!showCreate && (
-          <button type="button" className="btn-primary" onClick={() => setShowCreate(true)}>
+          <button type="button" className="btn-primary btn-sm" onClick={() => setShowCreate(true)}>
             Start a club
           </button>
         )}
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {(error || loadError) && <div className="error">{error || loadError}</div>}
 
       {invites.length > 0 && (
         <section>
@@ -93,19 +84,19 @@ export default function Clubs({ refreshKey, onClubsChanged }: { refreshKey: numb
         </section>
       )}
 
-      {loading ? (
-        <div className="loading">Loading…</div>
+      {!data ? (
+        !loadError && <div className="loading">Loading…</div>
       ) : clubs.length === 0 && invites.length === 0 ? (
         <div className="empty">
           <p>No clubs yet.</p>
           <p className="muted">Start one with a few friends.</p>
         </div>
       ) : (
-        <ul className="plain-list club-list">
+        <ul className="plain-list">
           {clubs.map((c) => (
             <li key={c.id}>
-              <a className="club-card" href={`#/club/${c.id}`}>
-                <div className="club-card-main">
+              <a className="row club-card" href={`#/club/${c.id}`}>
+                <div className="info">
                   <div className="title">
                     {c.name}
                     {c.role === "owner" && <span className="badge">Owner</span>}
@@ -117,13 +108,8 @@ export default function Clubs({ refreshKey, onClubsChanged }: { refreshKey: numb
                     {STAGE_LABEL[c.stage] &&
                       ` · ${STAGE_LABEL[c.stage]} · ${c.nominationCount > 0 ? `${c.nominationCount} nominated` : "no nominations yet"}`}
                   </div>
-                  {c.currentPick && (
-                    <div className="club-current-pick">
-                      <span className="muted">Now reading:</span> {c.currentPick.title}
-                    </div>
-                  )}
+                  {c.currentPick && <div className="club-current-pick">Reading {c.currentPick.title}</div>}
                 </div>
-                <IconChevronRight size={20} className="club-chevron" />
               </a>
             </li>
           ))}
@@ -135,7 +121,7 @@ export default function Clubs({ refreshKey, onClubsChanged }: { refreshKey: numb
           onDone={(clubId) => {
             setShowCreate(false);
             if (clubId) openClub(clubId);
-            else load();
+            else reload();
           }}
         />
       )}
